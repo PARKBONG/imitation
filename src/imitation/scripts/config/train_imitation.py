@@ -64,6 +64,17 @@ def defaults(
 
 
 @train_imitation_ex.named_config
+def peginhole_v1():
+    # normalize = False  # Use VecNormalize
+    common = dict(env_name="GripperPegInHole2DPyBulletEnv-v1",
+    # max_episode_steps = 100,
+    # num_vec = 16  # number of environments in VecEnv)
+    )
+    #bc_kwargs = dict(l2_weight=0.0)
+    dagger = dict(total_timesteps=20000)
+
+
+@train_imitation_ex.named_config
 def mountain_car():
     common = dict(env_name="MountainCar-v0")
     bc_kwargs = dict(l2_weight=0.0)

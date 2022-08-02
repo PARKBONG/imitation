@@ -1,0 +1,67 @@
+{
+  "agent_path": null,
+  "common": {
+    "env_make_kwargs": {},
+    "env_name": "GripperPegInHole2DPyBulletEnv-v1",
+    "log_dir": "quickstart/rl/",
+    "log_format_strs": [
+      "tensorboard",
+      "stdout",
+      "wandb"
+    ],
+    "log_format_strs_additional": {
+      "wandb": null
+    },
+    "log_level": 20,
+    "log_root": null,
+    "max_episode_steps": 100,
+    "num_vec": 8,
+    "parallel": true,
+    "wandb": {
+      "wandb_additional_info": {},
+      "wandb_kwargs": {
+        "monitor_gym": false,
+        "project": "imitation",
+        "save_code": false
+      },
+      "wandb_name_prefix": "",
+      "wandb_tag": null
+    }
+  },
+  "load_reward_kwargs": {},
+  "normalize_kwargs": {},
+  "normalize_reward": false,
+  "policy_save_final": true,
+  "policy_save_interval": 10000,
+  "reward_path": null,
+  "reward_type": null,
+  "rl": {
+    "batch_size": 256,
+    "rl_cls": {
+      "py/type": "stable_baselines3.sac.sac.SAC"
+    },
+    "rl_kwargs": {
+      "batch_size": null,
+      "ent_coef": 0.01,
+      "gamma": 0.99,
+      "gradient_steps": -1,
+      "learning_rate": 0.001,
+      "target_update_interval": 1,
+      "tau": 0.05
+    }
+  },
+  "rollout_save_final": true,
+  "rollout_save_n_episodes": null,
+  "rollout_save_n_timesteps": 2000,
+  "seed": 0,
+  "total_timesteps": 1000000,
+  "train": {
+    "n_episodes_eval": 50,
+    "policy_cls": "MlpPolicy",
+    "policy_kwargs": {
+      "features_extractor_class": {
+        "py/type": "stable_baselines3.common.torch_layers.FlattenExtractor"
+      }
+    }
+  }
+}

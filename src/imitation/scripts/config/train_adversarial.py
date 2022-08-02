@@ -28,7 +28,7 @@ def defaults():
     )
     algorithm_specific = {}  # algorithm_specific[algorithm] is merged with config
 
-    checkpoint_interval = 0  # Num epochs between checkpoints (<0 disables)
+    checkpoint_interval = 5  # Num epochs between checkpoints (<0 disables)
     agent_path = None  # Path to load agent from, optional.
 
 
@@ -91,6 +91,51 @@ def pendulum():
 
 # Standard MuJoCo Gym environment named configs
 
+
+@train_adversarial_ex.named_config
+def peginhole_v1():
+    common = dict(env_name="GripperPegInHole2DPyBulletEnv-v1",
+    # max_episode_steps = 100,
+    # num_vec = 16  # number of environments in VecEnv)
+    )
+
+    checkpoint_interval = 100  # Num epochs between checkpoints (<0 disables)
+    reward = dict(
+    net_kwargs = dict(
+            normalize_input_layer=None  # noqa: F841
+    ))
+@train_adversarial_ex.named_config
+def peginhole_v2():
+    # normalize = False  # Use VecNormalize
+    common = dict(env_name="GripperPegInHole2DPyBulletEnv-v1",
+    # max_episode_steps = 100,
+    num_vec = 16  # number of environments in VecEnv)
+    )
+
+    checkpoint_interval = 5  # Num epochs between checkpoints (<0 disables)
+    rl = dict(batch_size=4096, rl_kwargs=dict(batch_size=1024))
+    algorithm_specific = dict(
+        airl=dict(total_timesteps=int(5e6)),
+        gail=dict(total_timesteps=int(8e6)),
+    )
+    reward = dict(
+        algorithm_specific=dict(
+            airl=dict(
+                net_cls=reward_nets.BasicShapedRewardNet,
+                net_kwargs=dict(
+                    reward_hid_sizes=(32,),
+                    potential_hid_sizes=(32,),
+                ),
+            ),
+        ),
+    )
+    algorithm_kwargs = dict(
+        # Number of discriminator updates after each round of generator updates
+        n_disc_updates_per_round=10,
+        # Equivalent to no replay buffer if batch size is the same
+        gen_replay_buffer_capacity=4096,
+        demo_batch_size=2048,
+    )
 
 @train_adversarial_ex.named_config
 def seals_ant():

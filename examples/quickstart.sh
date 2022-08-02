@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+python -m imitation.scripts.train_rl with peginhole_v1 train.sac rl.sac common.wandb_logging common.log_dir=quickstart/rl/
 # Train PPO agent on pendulum and collect expert demonstrations. Tensorboard logs saved in quickstart/rl/
 python -m imitation.scripts.train_rl with pendulum common.fast train.fast rl.fast fast common.log_dir=quickstart/rl/
 

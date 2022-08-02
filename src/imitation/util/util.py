@@ -115,10 +115,11 @@ def make_vec_env(
         # necessary to work around gym bug where it chokes on numpy int64s.
         env.seed(int(this_seed))
 
-        if max_episode_steps is not None:
-            env = TimeLimit(env, max_episode_steps)
-        elif spec.max_episode_steps is not None:
-            env = TimeLimit(env, max_episode_steps=spec.max_episode_steps)
+        if not isinstance(env, TimeLimit):
+            if max_episode_steps is not None:
+                env = TimeLimit(env, max_episode_steps)
+            elif spec.max_episode_steps is not None:
+                env = TimeLimit(env, max_episode_steps=spec.max_episode_steps)
 
         # Use Monitor to record statistics needed for Baselines algorithms logging
         # Optionally, save to disk
