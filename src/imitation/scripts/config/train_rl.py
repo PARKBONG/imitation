@@ -6,10 +6,13 @@ from imitation.scripts.common import common, rl, train
 import sb3_contrib 
 from stable_baselines3.common.utils import get_linear_fn
 
+from imitation.rewards import reward_nets, serialize
+from imitation.util import networks, util
+# from imitation.algorithms.adversarial.gail import RewardNetFromDiscriminatorLogit
 train_rl_ex = sacred.Experiment(
     "train_rl",
     ingredients=[common.common_ingredient, train.train_ingredient, rl.rl_ingredient],
-    save_git_info=False
+    save_git_info=False,
 )
 
 
@@ -65,8 +68,8 @@ def peginhole_v1():
         # device="cpu"
 
         exploration_schedule = get_linear_fn(
-            0.3,
-            0.05,
+            0.0,
+            0.00,
             0.3,
         )
         ),
@@ -74,6 +77,38 @@ def peginhole_v1():
     seed = 0
     total_timesteps = int(1e6)
 
+@train_rl_ex.named_config
+def peginhole_v1_imit():
+    normalize_reward=False
+    # normalize = False  # Use VecNormalize
+    common = dict(env_name="GripperPegInHole2DPyBulletEnv-v1",
+    max_episode_steps = 100,
+    num_vec = 8  # number of environments in VecEnv)
+    )
+    rl = dict(
+        rl_cls=sb3_contrib.SAC,
+        # batch_size=4096,
+        batch_size = 1024,  # batch size for RL algorithm
+        rl_kwargs=dict(
+        #     gamma=0.99,
+        learning_rate=3e-4,
+        tau=0.005, gamma=0.99, gradient_steps=-1, ent_coef=0.01,
+        target_update_interval=1,
+        # device="cpu"
+
+        exploration_schedule = get_linear_fn(
+            0.0,
+            0.00,
+            0.3,
+        )
+        ),
+    )
+    seed = 0
+    total_timesteps = int(1e6)
+    # If specified, overrides the ground-truth environment reward
+    # reward_type = "RewardNetFromDiscriminatorLogit"  # override reward type
+    reward_path = "/root/imitation/jjh_data/expert_models/peginhole_v1_imit/reward_test.pt"  # override reward path
+    # load_reward_kwargs = {"normalize_input_layer": networks.RunningNorm}
 
 # Standard Gym env configs
 
