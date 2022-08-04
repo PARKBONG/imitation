@@ -24,6 +24,20 @@ def wandb_config():
     locals()
 
 
+@wandb_ingredient.named_config
+def wandb_rl():
+    # Other users can overwrite this function to customize their wandb.init() call.
+    wandb_tag = None  # User-specified tag for this run
+    wandb_name_prefix = ""  # User-specified prefix for the run name
+    wandb_kwargs = dict(
+        project="RL",
+        monitor_gym=False,
+        save_code=False,
+    )  # Other kwargs to pass to wandb.init()
+    wandb_additional_info = dict()
+
+    locals()
+
 @wandb_ingredient.capture
 def wandb_init(
     _run,
