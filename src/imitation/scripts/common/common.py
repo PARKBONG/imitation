@@ -62,6 +62,15 @@ def hook(config, command_name, logger):
 def wandb_logging():
     log_format_strs_additional = {"wandb": None}  # noqa: F841
 
+@common_ingredient.named_config
+def wandb_logging_name():
+    log_format_strs_additional = {"wandb": dict(
+        wandb_kwargs = dict(
+            project="after_rl",
+            monitor_gym=False,
+            save_code=False,
+        )  # Other kwargs to pass to wandb.init()
+    )}  # noqa: F841
 
 @common_ingredient.named_config
 def fast():

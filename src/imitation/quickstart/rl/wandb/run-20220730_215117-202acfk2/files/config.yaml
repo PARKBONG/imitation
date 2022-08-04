@@ -1,0 +1,109 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.12.21
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.8.0
+    start_time: 1659185477
+    t:
+      1:
+      - 1
+      - 52
+      - 55
+      3:
+      - 13
+      - 15
+      - 16
+      4: 3.8.0
+      5: 0.12.21
+      8:
+      - 5
+agent_path:
+  desc: null
+  value: null
+common:
+  desc: null
+  value:
+    env_make_kwargs: {}
+    env_name: GripperPegInHole2DPyBulletEnv-v1
+    log_dir: quickstart/rl/
+    log_format_strs:
+    - tensorboard
+    - stdout
+    - wandb
+    log_format_strs_additional:
+      wandb: null
+    log_level: 20
+    log_root: null
+    max_episode_steps: 100
+    num_vec: 8
+    parallel: true
+    wandb:
+      wandb_additional_info: {}
+      wandb_kwargs:
+        monitor_gym: false
+        project: imitation
+        save_code: false
+      wandb_name_prefix: ''
+      wandb_tag: null
+load_reward_kwargs:
+  desc: null
+  value: {}
+normalize_kwargs:
+  desc: null
+  value: {}
+normalize_reward:
+  desc: null
+  value: false
+policy_save_final:
+  desc: null
+  value: true
+policy_save_interval:
+  desc: null
+  value: 10000
+reward_path:
+  desc: null
+  value: null
+reward_type:
+  desc: null
+  value: null
+rl:
+  desc: null
+  value:
+    batch_size: 256
+    rl_cls: stable_baselines3.sac.sac.SAC
+    rl_kwargs:
+      batch_size: null
+      device: cpu
+      ent_coef: 0.01
+      gamma: 0.99
+      gradient_steps: -1
+      learning_rate: 0.001
+      target_update_interval: 1
+      tau: 0.005
+rollout_save_final:
+  desc: null
+  value: true
+rollout_save_n_episodes:
+  desc: null
+  value: null
+rollout_save_n_timesteps:
+  desc: null
+  value: 2000
+seed:
+  desc: null
+  value: 2326369
+total_timesteps:
+  desc: null
+  value: 200000
+train:
+  desc: null
+  value:
+    n_episodes_eval: 50
+    policy_cls: imitation.policies.base.SAC256Policy
+    policy_kwargs:
+      features_extractor_class: stable_baselines3.common.torch_layers.FlattenExtractor

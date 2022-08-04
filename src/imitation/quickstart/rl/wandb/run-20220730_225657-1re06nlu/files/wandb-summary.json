@@ -1,0 +1,1 @@
+{"time/episodes": 12, "_timestamp": 1659189495, "_runtime": 78, "time/fps": 24, "time/time_elapsed": 65, "time/total_timesteps": 1600, "train/actor_loss": 9.944279670715332, "train/critic_loss": 0.09440170042216778, "train/ent_coef": 0.009999999776482582, "train/learning_rate": 0.001, "train/n_updates": 1496, "_step": 1600}

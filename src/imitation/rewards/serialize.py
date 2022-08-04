@@ -14,6 +14,7 @@ from imitation.rewards.reward_nets import (
     RewardNetWrapper,
     ShapedRewardNet,
 )
+from imitation.algorithms.adversarial.gail import RewardNetFromDiscriminatorLogit
 from imitation.util import registry, util
 
 # TODO(sam): I suspect this whole file can be replaced with th.load calls. Try
@@ -193,6 +194,15 @@ def load_zero(path: str, venv: VecEnv) -> reward_function.RewardFn:
 
 
 # TODO(adam): I think we can get rid of this and have just one RewardNet.
+
+reward_registry.register(
+    key="SigmoidNet",
+    value=lambda path, _, **kwargs: ValidateRewardFn(
+        _make_functional(
+            _validate_wrapper_structure(th.load(str(path)), {(RewardNetFromDiscriminatorLogit,)}),
+        ),
+    ),
+)
 
 reward_registry.register(
     key="RewardNet_shaped",

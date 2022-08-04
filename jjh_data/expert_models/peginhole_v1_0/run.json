@@ -1,0 +1,152 @@
+{
+  "artifacts": [],
+  "command": "train_rl",
+  "experiment": {
+    "base_dir": "/root/imitation/src/imitation/scripts/config",
+    "dependencies": [
+      "chai-sacred==0.8.3",
+      "imitation==0.2.1.dev111",
+      "numpy==1.22.4",
+      "sb3-contrib==1.5.1a5",
+      "stable-baselines3==1.6.0"
+    ],
+    "mainfile": "train_rl.py",
+    "name": "train_rl",
+    "repositories": [
+      {
+        "commit": "b71cedd11dd32da3ec40d2fae4378ca26dae532e",
+        "dirty": true,
+        "url": "git@github.com:wognl0402/imitation.git"
+      },
+      {
+        "commit": "b71cedd11dd32da3ec40d2fae4378ca26dae532e",
+        "dirty": true,
+        "url": "git@github.com:wognl0402/imitation.git"
+      },
+      {
+        "commit": "b71cedd11dd32da3ec40d2fae4378ca26dae532e",
+        "dirty": true,
+        "url": "git@github.com:wognl0402/imitation.git"
+      },
+      {
+        "commit": "b71cedd11dd32da3ec40d2fae4378ca26dae532e",
+        "dirty": true,
+        "url": "git@github.com:wognl0402/imitation.git"
+      },
+      {
+        "commit": "b71cedd11dd32da3ec40d2fae4378ca26dae532e",
+        "dirty": true,
+        "url": "git@github.com:wognl0402/imitation.git"
+      }
+    ],
+    "sources": [
+      [
+        "../common/__init__.py",
+        "_sources/__init___95637081ea1978e57fafe2d32cac0a27.py"
+      ],
+      [
+        "../common/common.py",
+        "_sources/common_44bc3ebb6537d17db6a87b2923b422d3.py"
+      ],
+      [
+        "../common/rl.py",
+        "_sources/rl_e8c2b6f5e6ff4684582700831bc0d13f.py"
+      ],
+      [
+        "../common/train.py",
+        "_sources/train_4018c506214fe821f078beebe676ddba.py"
+      ],
+      [
+        "../common/wb.py",
+        "_sources/wb_fd01a42ab05b784cca3a63775fd24ec3.py"
+      ],
+      [
+        "train_rl.py",
+        "_sources/train_rl_c99d97393fcc77731e25cedd3e8463fb.py"
+      ]
+    ]
+  },
+  "heartbeat": "2022-08-02T08:53:21.351938",
+  "host": {
+    "ENV": {},
+    "cpu": "Intel(R) Xeon(R) Gold 6248R CPU @ 3.00GHz",
+    "gpus": {
+      "driver_version": "515.48.07",
+      "gpus": [
+        {
+          "model": "NVIDIA GeForce RTX 3090",
+          "persistence_mode": false,
+          "total_memory": 24576
+        },
+        {
+          "model": "NVIDIA GeForce RTX 3090",
+          "persistence_mode": false,
+          "total_memory": 24576
+        },
+        {
+          "model": "NVIDIA GeForce RTX 3090",
+          "persistence_mode": false,
+          "total_memory": 24576
+        }
+      ]
+    },
+    "hostname": "f46e81d3fc09",
+    "os": [
+      "Linux",
+      "Linux-5.15.0-41-generic-x86_64-with-glibc2.10"
+    ],
+    "python_version": "3.8.0"
+  },
+  "meta": {
+    "command": "train_rl",
+    "config_updates": {
+      "common": {
+        "log_dir": "quickstart/rl/"
+      }
+    },
+    "named_configs": [
+      "train.sac",
+      "peginhole_v1",
+      "rl.sac",
+      "train.normalize_disable",
+      "common.wandb_logging"
+    ],
+    "options": {
+      "--beat-interval": null,
+      "--capture": null,
+      "--comment": null,
+      "--debug": false,
+      "--enforce_clean": false,
+      "--file_storage": null,
+      "--force": false,
+      "--help": false,
+      "--id": null,
+      "--loglevel": null,
+      "--mongo_db": null,
+      "--name": null,
+      "--pdb": false,
+      "--print-config": false,
+      "--priority": null,
+      "--queue": false,
+      "--s3": null,
+      "--sql": null,
+      "--tiny_db": null,
+      "--unobserved": false,
+      "COMMAND": null,
+      "UPDATE": [
+        "train.sac",
+        "peginhole_v1",
+        "rl.sac",
+        "train.normalize_disable",
+        "common.wandb_logging",
+        "common.log_dir=quickstart/rl/"
+      ],
+      "help": false,
+      "with": true
+    }
+  },
+  "resources": [],
+  "result": null,
+  "start_time": "2022-07-31T18:31:57.724049",
+  "status": "RUNNING"
+}

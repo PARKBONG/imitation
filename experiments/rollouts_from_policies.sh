@@ -61,7 +61,7 @@ parallel -j 25% --header : --results "${OUTPUT_DIR}/parallel/" --colsep , \
   with \
   '{env_config_name}' \
   common.log_root="${OUTPUT_DIR}" \
-  policy_type="ppo" policy_path="${expert_models_dir}/{env_config_name}_0/policies/final/" \
+  policy_type="sac" policy_path="${expert_models_dir}/{env_config_name}_0/policies/final/" \
   rollout_save_path="${OUTPUT_DIR}/{env_config_name}_0/rollouts/final.pkl" \
   eval_n_episodes='{n_demonstrations}' \
   eval_n_timesteps=None \

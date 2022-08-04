@@ -87,6 +87,10 @@ class SAC1024Policy(sac_policies.SACPolicy):
         """Builds SAC1024Policy; arguments passed to `SACPolicy`."""
         super().__init__(*args, **kwargs, net_arch=[1024, 1024])
 
+class SAC256Policy(sac_policies.SACPolicy):
+    def __init__(self, *args, **kwargs):
+        """Builds SAC1024Policy; arguments passed to `SACPolicy`."""
+        super().__init__(*args, **kwargs, net_arch=[256, 256])
 
 class NormalizeFeaturesExtractor(torch_layers.FlattenExtractor):
     """Feature extractor that flattens then normalizes input."""

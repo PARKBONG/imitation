@@ -109,7 +109,16 @@ def seals_walker():
 def fast():
     common = dict(env_name="CartPole-v1", num_vec=1, parallel=False)
     render = True
-    policy_type = "ppo"
     policy_path = "tests/testdata/expert_models/cartpole_0/policies/final/"
     eval_n_timesteps = 1
     eval_n_episodes = None
+
+@eval_policy_ex.named_config
+def peginhole_v1():
+    # normalize_reward=False
+    # normalize = False  # Use VecNormalize
+    common = dict(env_name="GripperPegInHole2DPyBulletEnv-v1",
+    max_episode_steps = 100,
+    num_vec = 16  # number of environments in VecEnv)
+    )
+    policy_type = "sac"

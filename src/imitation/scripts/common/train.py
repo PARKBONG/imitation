@@ -33,8 +33,11 @@ def fast():
 
 @train_ingredient.named_config
 def sac():
-    policy_cls = base.SAC1024Policy  # noqa: F841
+    policy_cls = "MlpPolicy"
 
+@train_ingredient.named_config
+def sac1024():
+    policy_cls = base.SAC1024Policy  # noqa: F841
 
 @train_ingredient.named_config
 def normalize_disable():
