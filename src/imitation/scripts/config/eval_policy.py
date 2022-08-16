@@ -117,8 +117,8 @@ def fast():
 def peginhole_v1():
     # normalize_reward=False
     # normalize = False  # Use VecNormalize
-    common = dict(env_name="GripperPegInHole2DPyBulletEnv-v1",
-    max_episode_steps = 100,
+    common = dict(env_name="Gripper-v0",
+    max_episode_steps = 40,
     num_vec = 16  # number of environments in VecEnv)
     )
     policy_type = "sac"

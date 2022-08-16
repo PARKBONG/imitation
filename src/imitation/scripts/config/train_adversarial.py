@@ -94,17 +94,41 @@ def pendulum():
 
 @train_adversarial_ex.named_config
 def peginhole_v1():
-    common = dict(env_name="GripperPegInHole2DPyBulletEnv-v1",
+    common = dict(env_name="Gripper-v0",
     # max_episode_steps = 100,
-    # num_vec = 16  # number of environments in VecEnv)
+    num_vec = 16 , # number of environments in VecEnv)
     )
-
-    checkpoint_interval = 100  # Num epochs between checkpoints (<0 disables)
+    rl=dict(rl_kwargs=dict(ent_coef=0.01,device="cpu"),)
+    checkpoint_interval = 10  # Num epochs between checkpoints (<0 disables)
     reward = dict(
-        normalize_output_layer=None,
-        net_kwargs = dict(
-            normalize_input_layer=None,  # noqa: F841
-    ))
+        algorithm_specific=dict(
+            airl=dict(
+                net_cls=reward_nets.BasicShapedRewardNet,
+                net_kwargs=dict(
+                    # normalize_input_layer=None,
+                    # normalize_output_layer=None,  # noqa: F841(
+                    reward_hid_sizes=(32,),
+                    potential_hid_sizes=(32,),
+                ),
+            ),
+            irdd=dict(
+                net_cls=reward_nets.BasicShapedRewardNet,
+                net_kwargs=dict(
+                    # normalize_input_layer=None,
+                    # normalize_output_layer=None,  # noqa: F841(
+                    reward_hid_sizes=(32,),
+                    potential_hid_sizes=(32,),
+                ), 
+            )
+        ),
+    )
+    algorithm_kwargs = dict(
+        # Number of discriminator updates after each round of generator updates
+        n_disc_updates_per_round=20,
+        # Equivalent to no replay buffer if batch size is the same
+        gen_replay_buffer_capacity=1024,
+        demo_batch_size=512,
+    )
 
 @train_adversarial_ex.named_config
 def peginhole_v2():

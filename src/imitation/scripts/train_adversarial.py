@@ -9,6 +9,7 @@ import sacred.commands
 import torch as th
 from sacred.observers import FileStorageObserver
 
+from imitation.algorithms.adversarial import irdd as irdd_algo
 from imitation.algorithms.adversarial import airl as airl_algo
 from imitation.algorithms.adversarial import common
 from imitation.algorithms.adversarial import gail as gail_algo
@@ -111,6 +112,7 @@ def train_adversarial(
         # Running `train_adversarial print_config` will show unmerged config.
         # So, support showing merged config from `train_adversarial {airl,gail}`.
         sacred.commands.print_config(_run)
+    sacred.commands.print_config(_run)
 
     custom_logger, log_dir = common_config.setup_logging()
     expert_trajs = demonstrations.load_expert_trajs()
@@ -167,6 +169,10 @@ def gail():
 def airl():
     return train_adversarial(algo_cls=airl_algo.AIRL)
 
+
+@train_adversarial_ex.command
+def irdd():
+    return train_adversarial(algo_cls=irdd_algo.IRDD)
 
 def main_console():
     observer = FileStorageObserver(osp.join("output", "sacred", "train_adversarial"))

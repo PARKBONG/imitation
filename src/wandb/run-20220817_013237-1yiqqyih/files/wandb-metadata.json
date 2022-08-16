@@ -1,0 +1,24 @@
+{
+    "os": "Linux-5.15.0-43-generic-x86_64-with-glibc2.17",
+    "python": "3.8.13",
+    "heartbeatAt": "2022-08-16T16:32:38.335757",
+    "startedAt": "2022-08-16T16:32:37.239457",
+    "docker": null,
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "gpu_count": 3,
+    "cpu_count": 96,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "eee.py",
+    "codePath": "src/eee.py",
+    "git": {
+        "remote": "git@github.com:wognl0402/imitation.git",
+        "commit": "4d01d06257a6a53bc661a612fe19ba667d6df30c"
+    },
+    "email": "wognl0402@kaist.ac.kr",
+    "root": "/root/imitation",
+    "host": "f46e81d3fc09",
+    "username": "root",
+    "executable": "/root/anaconda3/envs/CI/bin/python3"
+}

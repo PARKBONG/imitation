@@ -1,3 +1,4 @@
+"""Adversarial Inverse Reinforcement Learning (AIRL)."""
 """Core code for adversarial imitation learning, shared between GAIL and AIRL."""
 import abc
 import collections
@@ -19,79 +20,19 @@ from imitation.data import buffer, rollout, types, wrappers
 from imitation.rewards import reward_nets, reward_wrapper
 from imitation.util import logger, networks, util
 
+import torch as th
+from stable_baselines3.common import base_class, policies, vec_env
+from stable_baselines3.sac import policies as sac_policies
 
-def compute_train_stats(
-    disc_logits_expert_is_high: th.Tensor,
-    labels_expert_is_one: th.Tensor,
-    disc_loss: th.Tensor,
-) -> Mapping[str, float]:
-    """Train statistics for GAIL/AIRL discriminator.
+from imitation.algorithms import base
+from imitation.algorithms.adversarial import common
+from imitation.rewards import reward_nets
 
-    Args:
-        disc_logits_expert_is_high: discriminator logits produced by
-            `AdversarialTrainer.logits_expert_is_high`.
-        labels_expert_is_one: integer labels describing whether logit was for an
-            expert (0) or generator (1) sample.
-        disc_loss: final discriminator loss.
-
-    Returns:
-        A mapping from statistic names to float values.
-    """
-    with th.no_grad():
-        # Logits of the discriminator output; >0 for expert samples, <0 for generator.
-        bin_is_generated_pred = disc_logits_expert_is_high < 0
-        # Binary label, so 1 is for expert, 0 is for generator.
-        bin_is_generated_true = labels_expert_is_one == 0
-        bin_is_expert_true = th.logical_not(bin_is_generated_true)
-        int_is_generated_pred = bin_is_generated_pred.long()
-        int_is_generated_true = bin_is_generated_true.long()
-        n_generated = float(th.sum(int_is_generated_true))
-        n_labels = float(len(labels_expert_is_one))
-        n_expert = n_labels - n_generated
-        pct_expert = n_expert / float(n_labels) if n_labels > 0 else float("NaN")
-        n_expert_pred = int(n_labels - th.sum(int_is_generated_pred))
-        if n_labels > 0:
-            pct_expert_pred = n_expert_pred / float(n_labels)
-        else:
-            pct_expert_pred = float("NaN")
-        correct_vec = th.eq(bin_is_generated_pred, bin_is_generated_true)
-        acc = th.mean(correct_vec.float())
-
-        _n_pred_expert = th.sum(th.logical_and(bin_is_expert_true, correct_vec))
-        if n_expert < 1:
-            expert_acc = float("NaN")
-        else:
-            # float() is defensive, since we cannot divide Torch tensors by
-            # Python ints
-            expert_acc = _n_pred_expert / float(n_expert)
-
-        _n_pred_gen = th.sum(th.logical_and(bin_is_generated_true, correct_vec))
-        _n_gen_or_1 = max(1, n_generated)
-        generated_acc = _n_pred_gen / float(_n_gen_or_1)
-
-        label_dist = th.distributions.Bernoulli(logits=disc_logits_expert_is_high)
-        entropy = th.mean(label_dist.entropy())
-
-    pairs = [
-        ("disc_loss", float(th.mean(disc_loss))),
-        # accuracy, as well as accuracy on *just* expert examples and *just*
-        # generated examples
-        ("disc_acc", float(acc)),
-        ("disc_acc_expert", float(expert_acc)),
-        ("disc_acc_gen", float(generated_acc)),
-        # entropy of the predicted label distribution, averaged equally across
-        # both classes (if this drops then disc is very good or has given up)
-        ("disc_entropy", float(entropy)),
-        # true number of expert demos and predicted number of expert demos
-        ("disc_proportion_expert_true", float(pct_expert)),
-        ("disc_proportion_expert_pred", float(pct_expert_pred)),
-        ("n_expert", float(n_expert)),
-        ("n_generated", float(n_generated)),
-    ]  # type: Sequence[Tuple[str, float]]
-    return collections.OrderedDict(pairs)
+from stable_baselines3.common.utils import obs_as_tensor, safe_mean
+STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 
 
-class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
+class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
     """Base class for adversarial imitation learning algorithms like GAIL and AIRL."""
 
     venv: vec_env.VecEnv
@@ -111,10 +52,12 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
         venv: vec_env.VecEnv,
         gen_algo: base_class.BaseAlgorithm,
         reward_net: reward_nets.RewardNet,
+        constraint_net: reward_nets.RewardNet,
         n_disc_updates_per_round: int = 2,
         log_dir: str = "output/",
         disc_opt_cls: Type[th.optim.Optimizer] = th.optim.Adam,
         disc_opt_kwargs: Optional[Mapping] = None,
+        const_disc_opt_kwargs: Optional[Mapping] = None,
         gen_train_timesteps: Optional[int] = None,
         gen_replay_buffer_capacity: Optional[int] = None,
         custom_logger: Optional[logger.HierarchicalLogger] = None,
@@ -187,18 +130,30 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
         self.venv = venv
         self.gen_algo = gen_algo
         self._reward_net = reward_net.to(gen_algo.device)
+
+        self._constraint_net = constraint_net.to(gen_algo.device)
         self._log_dir = log_dir
 
         # Create graph for optimising/recording stats on discriminator
         self._disc_opt_cls = disc_opt_cls
         self._disc_opt_kwargs = disc_opt_kwargs or {}
+        self._const_disc_opt_kwargs = const_disc_opt_kwargs or {}
         self._init_tensorboard = init_tensorboard
         self._init_tensorboard_graph = init_tensorboard_graph
-        self._disc_opt = self._disc_opt_cls(
-            self._reward_net.parameters(),
-            **self._disc_opt_kwargs,
+        self._disc_opt = []
+        self._disc_opt.append(
+            self._disc_opt_cls(
+                self._reward_net.parameters(),
+                **self._disc_opt_kwargs,
+            )
         )
-
+        self._disc_opt.append(
+            self._disc_opt_cls(
+                self._constraint_net.parameters(),
+                **self._const_disc_opt_kwargs,
+            )
+        )
+        
         if self._init_tensorboard:
             logging.info("building summary directory at " + self._log_dir)
             summary_dir = os.path.join(self._log_dir, "summary")
@@ -212,9 +167,11 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
             self.venv_wrapped = venv
             self.gen_callback = None
         else:
-            venv = self.venv_wrapped = reward_wrapper.RewardVecEnvWrapper(
+            venv = self.venv_wrapped = reward_wrapper.ConstRewardVecEnvWrapper(
                 venv,
-                reward_fn=self.reward_train.predict_processed,
+                # reward_fn=self.reward_train.predict_processed,
+                reward_fn= lambda *args:  self.reward_train.predict_processed(*args) +self.constraint_train.predict_processed (*args),
+                constraint_fn=self.constraint_train.predict_processed,
             )
             self.gen_callback = self.venv_wrapped.make_log_callback()
         self.venv_train = self.venv_wrapped
@@ -242,43 +199,106 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
     def policy(self) -> policies.BasePolicy:
         return self.gen_algo.policy
 
-    @abc.abstractmethod
+    @property
+    def const_policy(self) -> policies.BasePolicy:
+        return self.gen_algo.const_policy
+
     def logits_expert_is_high(
         self,
         state: th.Tensor,
         action: th.Tensor,
         next_state: th.Tensor,
         done: th.Tensor,
-        log_policy_act_prob: Optional[th.Tensor] = None,
+        log_policy_act_prob: th.Tensor,
     ) -> th.Tensor:
-        """Compute the discriminator's logits for each state-action sample.
+        r"""Compute the discriminator's logits for each state-action sample.
 
-        A high value corresponds to predicting expert, and a low value corresponds to
-        predicting generator.
+        In Fu's AIRL paper (https://arxiv.org/pdf/1710.11248.pdf), the
+        discriminator output was given as
+
+        .. math::
+
+            D_{\theta}(s,a) =
+            \frac{ \exp{r_{\theta}(s,a)} } { \exp{r_{\theta}(s,a)} + \pi(a|s) }
+
+        with a high value corresponding to the expert and a low value corresponding to
+        the generator.
+
+        In other words, the discriminator output is the probability that the action is
+        taken by the expert rather than the generator.
+
+        The logit of the above is given as
+
+        .. math::
+
+            \operatorname{logit}(D_{\theta}(s,a)) = r_{\theta}(s,a) - \log{ \pi(a|s) }
+
+        which is what is returned by this function.
 
         Args:
-            state: state at time t, of shape `(batch_size,) + state_shape`.
-            action: action taken at time t, of shape `(batch_size,) + action_shape`.
-            next_state: state at time t+1, of shape `(batch_size,) + state_shape`.
-            done: binary episode completion flag after action at time t,
-                of shape `(batch_size,)`.
-            log_policy_act_prob: log probability of generator policy taking
-                `action` at time t.
+            state: The state of the environment at the time of the action.
+            action: The action taken by the expert or generator.
+            next_state: The state of the environment after the action.
+            done: whether a `terminal state` (as defined under the MDP of the task) has
+                been reached.
+            log_policy_act_prob: The log probability of the action taken by the
+                generator, :math:`\log{ \pi(a|s) }`.
 
         Returns:
-            Discriminator logits of shape `(batch_size,)`. A high output indicates an
-            expert-like transition.
-        """  # noqa: DAR202
+            The logits of the discriminator for each state-action sample.
+
+        Raises:
+            TypeError: If `log_policy_act_prob` is None.
+        """
+        if log_policy_act_prob is None:
+            raise TypeError(
+                "Non-None `log_policy_act_prob` is required for this method.",
+            )
+        reward_output_train = self._reward_net(state, action, next_state, done)
+
+        const_output_train = self._constraint_net(state, action, next_state, done)
+        return reward_output_train + const_output_train.detach() - log_policy_act_prob
+
+    def const_logits_expert_is_high(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+        const_log_policy_act_prob: th.Tensor,
+    ) -> th.Tensor:
+        if const_log_policy_act_prob is None:
+            raise TypeError(
+                "Non-None `log_policy_act_prob` is required for this method.",
+            )
+        const_output_train = self._constraint_net(state, action, next_state, done)
+        return const_output_train - const_log_policy_act_prob
 
     @property
-    @abc.abstractmethod
     def reward_train(self) -> reward_nets.RewardNet:
-        """Reward used to train generator policy."""
+        return self._reward_net
 
     @property
-    @abc.abstractmethod
     def reward_test(self) -> reward_nets.RewardNet:
-        """Reward used to train policy at "test" time after adversarial training."""
+        """Returns the unshaped version of reward network used for testing."""
+        reward_net = self._reward_net
+        # Recursively return the base network of the wrapped reward net
+        while isinstance(reward_net, reward_nets.RewardNetWrapper):
+            reward_net = reward_net.base
+        return reward_net
+
+    @property
+    def constraint_train(self) -> reward_nets.RewardNet:
+        return self._constraint_net
+
+    @property
+    def constraint_test (self) -> reward_nets.RewardNet:
+        """Returns the unshaped version of reward network used for testing."""
+        reward_net = self._constraint_net
+        # Recursively return the base network of the wrapped reward net
+        while isinstance(reward_net, reward_nets.RewardNetWrapper):
+            reward_net = reward_net.base
+        return reward_net
 
     def set_demonstrations(self, demonstrations: base.AnyTransitions) -> None:
         self._demo_data_loader = base.make_data_loader(
@@ -334,11 +354,29 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
                 disc_logits,
                 batch["labels_expert_is_one"].float(),
             )
-
+            const_logits = self.const_logits_expert_is_high(
+                batch["state"],
+                batch["const_action"],
+                batch["next_state"],
+                batch["done"],
+                batch["const_log_policy_act_prob"],
+            )
+            const_loss = F.binary_cross_entropy_with_logits(
+                const_logits,
+                batch["labels_expert_is_one"].float(),
+            )
+            loss += const_loss
             # do gradient step
+
+            """
             self._disc_opt.zero_grad()
-            loss.backward()
             self._disc_opt.step()
+            """
+            for op in self._disc_opt:
+                op.zero_grad()
+            loss.backward()
+            for op in self._disc_opt:
+                op.step()
             self._disc_step += 1
 
             # compute/write stats and TensorBoard data
@@ -349,9 +387,13 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
                     loss,
                 )
             self.logger.record("global_step", self._global_step)
+
             if isinstance(self.reward_test, reward_nets.ScaledRewardNet):
-                self.logger.record("net_scale", float(self.reward_test.scale.cpu().detach().numpy()))
-                self.logger.record("net_bias", float(self.reward_test.bias.cpu().detach().numpy()))
+                self.logger.record("net_scale", float(self.reward_test.scale.cpu().detach().numpy())*100)
+                self.logger.record("net_bias", float(self.reward_test.bias.cpu().detach().numpy())*100)
+            if isinstance(self.constraint_test, reward_nets.ScaledRewardNet):
+                self.logger.record("net_scale", float(self.constraint_test.scale.cpu().detach().numpy())*100)
+                self.logger.record("net_bias", float(self.constraint_test.bias.cpu().detach().numpy())*100)
             for k, v in train_stats.items():
                 self.logger.record(k, v)
             self.logger.dump(self._disc_step)
@@ -440,6 +482,7 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
         self,
         obs_th: th.Tensor,
         acts_th: th.Tensor,
+        policy = None,
     ) -> Optional[th.Tensor]:
         """Evaluates the given actions on the given observations.
 
@@ -450,15 +493,17 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
         Returns:
             A batch of log policy action probabilities.
         """
-        if isinstance(self.policy, policies.ActorCriticPolicy):
+        if policy is None:
+            policy = self.policy
+        if isinstance(policy, policies.ActorCriticPolicy):
             # policies.ActorCriticPolicy has a concrete implementation of
             # evaluate_actions to generate log_policy_act_prob given obs and actions.
-            _, log_policy_act_prob_th, _ = self.policy.evaluate_actions(
+            _, log_policy_act_prob_th, _ = policy.evaluate_actions(
                 obs_th,
                 acts_th,
             )
-        elif isinstance(self.policy, sac_policies.SACPolicy):
-            gen_algo_actor = self.policy.actor
+        elif isinstance(policy, sac_policies.SACPolicy):
+            gen_algo_actor = policy.actor
             assert gen_algo_actor is not None
             # generate log_policy_act_prob from SAC actor.
             mean_actions, log_std, _ = gen_algo_actor.get_action_dist_params(obs_th)
@@ -469,8 +514,8 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
             # SAC applies a squashing function to bound the actions to a finite range
             # `acts_th` need to be scaled accordingly before computing log prob.
             # Scale actions only if the policy squashes outputs.
-            assert self.policy.squash_output
-            scaled_acts_th = self.policy.scale_action(acts_th)
+            assert policy.squash_output
+            scaled_acts_th = policy.scale_action(acts_th)
             log_policy_act_prob_th = distribution.log_prob(scaled_acts_th)
         else:
             return None
@@ -547,19 +592,34 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
         dones = np.concatenate([expert_samples["dones"], gen_samples["dones"]])
         # notice that the labels use the convention that expert samples are
         # labelled with 1 and generator samples with 0.
+
+        with th.no_grad():
+            # Convert to pytorch tensor or to TensorDict
+            obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
+            actions, values, log_probs = self.const_policy(obs_tensor)
+            actions = actions.detach().numpy()
+            assert actions.shape == gen_samples["acts"].shape
+        const_acts = np.concatenate([expert_samples["acts"], actions])
+
         labels_expert_is_one = np.concatenate(
             [np.ones(n_expert, dtype=int), np.zeros(n_gen, dtype=int)],
         )
+
 
         # Calculate generator-policy log probabilities.
         with th.no_grad():
             obs_th = th.as_tensor(obs, device=self.gen_algo.device)
             acts_th = th.as_tensor(acts, device=self.gen_algo.device)
+            const_acts_th = th.as_tensor(const_acts, device=self.gen_algo.device)
             log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th)
+            const_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, const_acts_th, self.const_policy)
             if log_policy_act_prob is not None:
                 assert len(log_policy_act_prob) == n_samples
                 log_policy_act_prob = log_policy_act_prob.reshape((n_samples,))
-            del obs_th, acts_th  # unneeded
+            if const_log_policy_act_prob is not None:
+                assert len(const_log_policy_act_prob) == n_samples
+                const_log_policy_act_prob = const_log_policy_act_prob.reshape((n_samples,))
+            del obs_th, acts_th, const_acts_th  # unneeded
 
         obs_th, acts_th, next_obs_th, dones_th = self.reward_train.preprocess(
             obs,
@@ -567,13 +627,92 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
             next_obs,
             dones,
         )
+
+        _, const_acts_th, _, _ = self.constraint_train.preprocess(
+            obs,
+            const_acts,
+            next_obs,
+            dones,
+        )
         batch_dict = {
             "state": obs_th,
             "action": acts_th,
+            "const_action": const_acts_th,
             "next_state": next_obs_th,
             "done": dones_th,
             "labels_expert_is_one": self._torchify_array(labels_expert_is_one),
             "log_policy_act_prob": log_policy_act_prob,
+            "const_log_policy_act_prob": const_log_policy_act_prob,
         }
 
         return batch_dict
+
+def compute_train_stats(
+    disc_logits_expert_is_high: th.Tensor,
+    labels_expert_is_one: th.Tensor,
+    disc_loss: th.Tensor,
+) -> Mapping[str, float]:
+    """Train statistics for GAIL/AIRL discriminator.
+
+    Args:
+        disc_logits_expert_is_high: discriminator logits produced by
+            `AdversarialTrainer.logits_expert_is_high`.
+        labels_expert_is_one: integer labels describing whether logit was for an
+            expert (0) or generator (1) sample.
+        disc_loss: final discriminator loss.
+
+    Returns:
+        A mapping from statistic names to float values.
+    """
+    with th.no_grad():
+        # Logits of the discriminator output; >0 for expert samples, <0 for generator.
+        bin_is_generated_pred = disc_logits_expert_is_high < 0
+        # Binary label, so 1 is for expert, 0 is for generator.
+        bin_is_generated_true = labels_expert_is_one == 0
+        bin_is_expert_true = th.logical_not(bin_is_generated_true)
+        int_is_generated_pred = bin_is_generated_pred.long()
+        int_is_generated_true = bin_is_generated_true.long()
+        n_generated = float(th.sum(int_is_generated_true))
+        n_labels = float(len(labels_expert_is_one))
+        n_expert = n_labels - n_generated
+        pct_expert = n_expert / float(n_labels) if n_labels > 0 else float("NaN")
+        n_expert_pred = int(n_labels - th.sum(int_is_generated_pred))
+        if n_labels > 0:
+            pct_expert_pred = n_expert_pred / float(n_labels)
+        else:
+            pct_expert_pred = float("NaN")
+        correct_vec = th.eq(bin_is_generated_pred, bin_is_generated_true)
+        acc = th.mean(correct_vec.float())
+
+        _n_pred_expert = th.sum(th.logical_and(bin_is_expert_true, correct_vec))
+        if n_expert < 1:
+            expert_acc = float("NaN")
+        else:
+            # float() is defensive, since we cannot divide Torch tensors by
+            # Python ints
+            expert_acc = _n_pred_expert / float(n_expert)
+
+        _n_pred_gen = th.sum(th.logical_and(bin_is_generated_true, correct_vec))
+        _n_gen_or_1 = max(1, n_generated)
+        generated_acc = _n_pred_gen / float(_n_gen_or_1)
+
+        label_dist = th.distributions.Bernoulli(logits=disc_logits_expert_is_high)
+        entropy = th.mean(label_dist.entropy())
+
+    pairs = [
+        ("disc_loss", float(th.mean(disc_loss))),
+        # accuracy, as well as accuracy on *just* expert examples and *just*
+        # generated examples
+        ("disc_acc", float(acc)),
+        ("disc_acc_expert", float(expert_acc)),
+        ("disc_acc_gen", float(generated_acc)),
+        # entropy of the predicted label distribution, averaged equally across
+        # both classes (if this drops then disc is very good or has given up)
+        ("disc_entropy", float(entropy)),
+        # true number of expert demos and predicted number of expert demos
+        ("disc_proportion_expert_true", float(pct_expert)),
+        ("disc_proportion_expert_pred", float(pct_expert_pred)),
+        ("n_expert", float(n_expert)),
+        ("n_generated", float(n_generated)),
+    ]  # type: Sequence[Tuple[str, float]]
+    return collections.OrderedDict(pairs)
