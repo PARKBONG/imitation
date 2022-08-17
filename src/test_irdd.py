@@ -22,6 +22,9 @@ import pybulletgym
 import pickle
 import os
 import logging
+import sys
+from imitation.util import util
+from imitation.scripts.train_adversarial import save
 with open('../jjh_data/peginhole_v1_0/rollouts/final3.pkl', 'rb') as f:
     rollouts = types.load(f)
 
@@ -35,10 +38,21 @@ if __name__ == '__main__':
             env = Monitor(env)
             return env
         return _init
+    print(sys.argv)
 
-    log_dir = "./log/"
-    wandb.init(project='good', sync_tensorboard=True, dir=log_dir)
-
+    log_dir = os.path.join(
+                "output",
+                sys.argv[0].split(".")[0],
+                util.make_unique_timestamp(),
+            )
+    os.makedirs(log_dir, exist_ok=True)
+    print(sys.argv)
+    if len(sys.argv) <2:
+        name = None
+    else:
+        name = 'irdd_' + sys.argv[1]
+    
+    wandb.init(project='good', sync_tensorboard=True, dir=log_dir, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -61,18 +75,20 @@ if __name__ == '__main__':
         device='cpu',
     )
     print(learner.n_epochs)
-    reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
-    reward_net = ScaledRewardNet(
-        venv.observation_space, venv.action_space, reward_fn =reward_fn, normalize_input_layer=None,
-    )
+    def reward_fn(s, a, ns, d):
+        return torch.norm(ns[...,1:3], dim=-1, keepdim=False)  
+    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
     reward_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,
+        potential_hid_sizes=[8, 8],
+        reward_hid_sizes=[8, 8],
     )
-    reward_net = NormalizedRewardNet(
-        base=reward_net, normalize_output_layer=RunningNorm,
-    )
+    # reward_net = NormalizedRewardNet(
+    #     base=reward_net, normalize_output_layer=RunningNorm,
+    # )
     constraint_net = ShapedScaledRewardNet(
         venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
+        potential_hid_sizes=[8, 8],
     )
     gail_trainer = IRDD(
         demonstrations=rollouts,
@@ -93,7 +109,12 @@ if __name__ == '__main__':
     #     learner, venv, 100, return_episode_rewards=True
     # )
     # print(learner_rewards_before_training)
-    gail_trainer.train(int(1e6))  # Note: set to 300000 for better results
+    checkpoint_interval=5
+    def cb(round_num):
+        if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:
+            save(gail_trainer, os.path.join(log_dir, "checkpoints", f"{round_num:05d}"))
+
+    gail_trainer.train(int(1e6), callback=cb)  # Note: set to 300000 for better results
     learner_rewards_after_training, _ = evaluate_policy(
         learner, venv, 100, return_episode_rewards=True
     )

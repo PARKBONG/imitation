@@ -29,6 +29,9 @@ def save(trainer, save_path):
     os.makedirs(save_path, exist_ok=True)
     th.save(trainer.reward_train, os.path.join(save_path, "reward_train.pt"))
     th.save(trainer.reward_test, os.path.join(save_path, "reward_test.pt"))
+    if hasattr(trainer, "constraint_train"):
+        th.save(trainer.constraint_train, os.path.join(save_path, "constraint_train.pt"))
+        th.save(trainer.constraint_test, os.path.join(save_path, "constraint_test.pt"))
     serialize.save_stable_model(
         os.path.join(save_path, "gen_policy"),
         trainer.gen_algo,
