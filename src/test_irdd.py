@@ -68,9 +68,9 @@ if __name__ == '__main__':
         # n_steps=512,
         ent_coef=0.01,
         learning_rate=0.0003,
-        n_epochs=20,
+        #n_epochs=80,
         # n_epochs=1,
-        n_steps=int(2048/32),
+        n_steps=int(2048/64),
         tensorboard_log='./logs/',
         device='cpu',
     )
@@ -83,9 +83,9 @@ if __name__ == '__main__':
         potential_hid_sizes=[8, 8],
         reward_hid_sizes=[8, 8],
     )
-    # reward_net = NormalizedRewardNet(
-    #     base=reward_net, normalize_output_layer=RunningNorm,
-    # )
+    reward_net = NormalizedRewardNet(
+        base=reward_net, normalize_output_layer=RunningNorm,
+    )
     constraint_net = ShapedScaledRewardNet(
         venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
         potential_hid_sizes=[8, 8],

@@ -274,6 +274,31 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         const_output_train = self._constraint_net(state, action, next_state, done)
         return const_output_train - const_log_policy_act_prob
 
+    def const_gen(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+        is_expert: th.Tensor, 
+    ):
+
+        const_output_train = self._constraint_net(state, action, next_state, done)[~is_expert]
+        return const_output_train.mean()
+
+    def const_expert(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor,
+    ):
+
+        const_output_train = self._constraint_net(state, action, next_state, done)[is_expert]
+        reward = - const_output_train + 0.5 * const_output_train ** 2 
+        return reward.mean()
+
     @property
     def reward_train(self) -> reward_nets.RewardNet:
         return self._reward_net
@@ -354,17 +379,32 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
                 disc_logits,
                 batch["labels_expert_is_one"].float(),
             )
-            const_logits = self.const_logits_expert_is_high(
+            # const_logits = self.const_logits_expert_is_high(
+            #     batch["state"],
+            #     batch["const_action"],
+            #     batch["next_state"],
+            #     batch["done"],
+            #     batch["const_log_policy_act_prob"],
+            # )
+            # const_loss = F.binary_cross_entropy_with_logits(
+            #     const_logits,
+            #     batch["labels_expert_is_one"].float(),
+            # )
+            const_loss_expert = self.const_expert(
                 batch["state"],
-                batch["const_action"],
+                batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["const_log_policy_act_prob"],
+                batch["labels_expert_is_one"].long(),
             )
-            const_loss = F.binary_cross_entropy_with_logits(
-                const_logits,
-                batch["labels_expert_is_one"].float(),
+            const_loss_gen = self.const_gen(
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
             )
+            const_loss = const_loss_expert + const_loss_gen
             loss += const_loss
             # do gradient step
 
@@ -389,11 +429,11 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
             self.logger.record("global_step", self._global_step)
 
             if isinstance(self.reward_test, reward_nets.ScaledRewardNet):
-                self.logger.record("net_scale", float(self.reward_test.scale.cpu().detach().numpy())*100)
-                self.logger.record("net_bias", float(self.reward_test.bias.cpu().detach().numpy())*100)
+                self.logger.record("net_scale", float(self.reward_test.scale.cpu().detach().numpy())*10)
+                self.logger.record("net_bias", float(self.reward_test.bias.cpu().detach().numpy())*10)
             if isinstance(self.constraint_test, reward_nets.ScaledRewardNet):
-                self.logger.record("net_scale", float(self.constraint_test.scale.cpu().detach().numpy())*100)
-                self.logger.record("net_bias", float(self.constraint_test.bias.cpu().detach().numpy())*100)
+                self.logger.record("net_scale", float(self.constraint_test.scale.cpu().detach().numpy())*10)
+                self.logger.record("net_bias", float(self.constraint_test.bias.cpu().detach().numpy())*10)
             for k, v in train_stats.items():
                 self.logger.record(k, v)
             self.logger.dump(self._disc_step)

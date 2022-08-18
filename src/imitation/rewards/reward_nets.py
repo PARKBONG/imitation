@@ -364,7 +364,7 @@ class ScaledRewardNet(RewardNet):
         outputs = reward_form * self.scale + self.bias
         assert outputs.shape == state.shape[:1]
 
-        return outputs * 100.0
+        return outputs * 10.0
 
 
 class BasicRewardNet(RewardNet):

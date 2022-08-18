@@ -114,6 +114,15 @@ def fast():
     eval_n_episodes = None
 
 @eval_policy_ex.named_config
+def gripper_v1():
+    # normalize_reward=False
+    # normalize = False  # Use VecNormalize
+    common = dict(env_name="Gripper-v1",
+    max_episode_steps = 40,
+    num_vec = 16  # number of environments in VecEnv)
+    )
+    policy_type = "sac"
+@eval_policy_ex.named_config
 def peginhole_v1():
     # normalize_reward=False
     # normalize = False  # Use VecNormalize
