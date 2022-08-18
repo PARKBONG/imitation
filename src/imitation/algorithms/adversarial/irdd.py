@@ -392,14 +392,14 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
             # )
             const_loss_expert = self.const_expert(
                 batch["state"],
-                batch["action"],
+                batch["const_action"],
                 batch["next_state"],
                 batch["done"],
                 batch["labels_expert_is_one"].long(),
             )
             const_loss_gen = self.const_gen(
                 batch["state"],
-                batch["action"],
+                batch["const_action"],
                 batch["next_state"],
                 batch["done"],
                 batch["labels_expert_is_one"].long(),
@@ -429,11 +429,11 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
             self.logger.record("global_step", self._global_step)
 
             if isinstance(self.reward_test, reward_nets.ScaledRewardNet):
-                self.logger.record("net_scale", float(self.reward_test.scale.cpu().detach().numpy())*10)
-                self.logger.record("net_bias", float(self.reward_test.bias.cpu().detach().numpy())*10)
+                self.logger.record("rew_scale", float(self.reward_test.scale.cpu().detach().numpy())*10)
+                self.logger.record("rew_bias", float(self.reward_test.bias.cpu().detach().numpy())*10)
             if isinstance(self.constraint_test, reward_nets.ScaledRewardNet):
-                self.logger.record("net_scale", float(self.constraint_test.scale.cpu().detach().numpy())*10)
-                self.logger.record("net_bias", float(self.constraint_test.bias.cpu().detach().numpy())*10)
+                self.logger.record("const_scale", float(self.constraint_test.scale.cpu().detach().numpy())*10)
+                self.logger.record("const_bias", float(self.constraint_test.bias.cpu().detach().numpy())*10)
             for k, v in train_stats.items():
                 self.logger.record(k, v)
             self.logger.dump(self._disc_step)

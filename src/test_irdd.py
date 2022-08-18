@@ -64,19 +64,19 @@ if __name__ == '__main__':
     learner = PPO(
         env=venv,
         policy=MlpPolicy,
-        # batch_size=64,
+        batch_size=128,
         # n_steps=512,
         ent_coef=0.01,
-        learning_rate=0.0003,
+        learning_rate=0.001,
         #n_epochs=80,
         # n_epochs=1,
-        n_steps=int(2048/64),
+        n_steps=int(2048/32),
         tensorboard_log='./logs/',
         device='cpu',
     )
     print(learner.n_epochs)
     def reward_fn(s, a, ns, d):
-        return torch.norm(ns[...,1:3], dim=-1, keepdim=False)  
+        return torch.norm(s[...,1:3], dim=-1, keepdim=False)  
     #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
     reward_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,
@@ -86,10 +86,14 @@ if __name__ == '__main__':
     reward_net = NormalizedRewardNet(
         base=reward_net, normalize_output_layer=RunningNorm,
     )
-    constraint_net = ShapedScaledRewardNet(
+    constraint_net = ScaledRewardNet(
         venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
-        potential_hid_sizes=[8, 8],
+        # potential_hid_sizes=[8, 8],
     )
+    # reward_net = ShapedScaledRewardNet(
+    #     venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
+    #     potential_hid_sizes=[8, 8],
+    # )
     gail_trainer = IRDD(
         demonstrations=rollouts,
         demo_batch_size=512,
