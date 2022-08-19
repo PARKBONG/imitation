@@ -5,6 +5,7 @@ import warnings
 from typing import Any, Mapping, Type
 
 import sacred
+import sb3_contrib
 import stable_baselines3 as sb3
 from stable_baselines3.common import (
     base_class,
@@ -51,6 +52,25 @@ def fast():
     # SB3 RL seems to need batch size of 2, otherwise it runs into numeric
     # issues when computing multinomial distribution during predict()
     rl_kwargs = dict(batch_size=2)
+    locals()  # quieten flake8
+
+
+@rl_ingredient.named_config
+def sac_custom():
+    # For recommended SAC hyperparams in each environment, see:
+    # https://github.com/DLR-RM/rl-baselines3-zoo/blob/master/hyperparams/sac.yml
+    rl_cls = sb3_contrib.SACLag
+    warnings.warn(
+        "SAC currently only supports continuous action spaces. "
+        "Consider adding a discrete version as mentioned here: "
+        "https://github.com/DLR-RM/stable-baselines3/issues/505",
+        category=RuntimeWarning,
+    )
+    # Default HPs are as follows:
+    batch_size = 1024  # batch size for RL algorithm
+    rl_kwargs = dict(batch_size=None, device="cpu")  # make sure to set batch size to None
+    # rl_kwargs = dict(batch_size=None, device="cpu")  # make sure to set batch size to None
+
     locals()  # quieten flake8
 
 

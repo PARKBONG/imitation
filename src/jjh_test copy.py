@@ -17,24 +17,46 @@ from stable_baselines3.ppo import MlpPolicy
 import gym
 import seals
 
+env = gym.make("CartPole-Cosnt-v0")
+expert = PPO(
+    policy=MlpPolicy,
+    env=env,
+    seed=0,
+    batch_size=64,
+    ent_coef=0.0,
+    learning_rate=0.0003,
+    n_epochs=10,
+    n_steps=64,
+    device='cpu'
+)
+expert.learn(100000)  # Note: set to 100000 to train a proficient expert
+#%%
 from imitation.data import rollout
 from imitation.data.wrappers import RolloutInfoWrapper
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from imitation.data import types
-import wandb
-from imitation.util import logger as imit_logger
-from imitation.scripts.common import wb
-import pybulletgym
-import pickle
-import os
-import logging
-import sys
-from imitation.scripts.train_adversarial import save
+rollouts = rollout.rollout(
+    expert,
+    DummyVecEnv([lambda: RolloutInfoWrapper(gym.make("seals/CartPole-v0"))] * 5),
+    rollout.make_sample_until(min_timesteps=None, min_episodes=60),
+)
 
-from imitation.util import util
-with open('../jjh_data/expert_models/cartpole_const/final.pkl', 'rb') as f:
-    rollouts = types.load(f)
+#%%
+import pickle
+with open('filename.pkl', 'wb') as f:
+	pickle.dump(rollouts, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+# %%
+
+learner_rewards_before_training, _ = evaluate_policy(
+    expert, env, 10, return_episode_rewards=True
+)
+print(np.mean(learner_rewards_before_training))
+
+#%%
+import pickle
+with open('filename.pkl', 'rb') as f:
+	rollouts = pickle.load(f)
 #%%
 from imitation.algorithms.adversarial.gail import GAIL
 from imitation.rewards.reward_nets import BasicRewardNet
@@ -43,36 +65,12 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.ppo import MlpPolicy 
 import gym
 import seals
 
 
-log_format_strs = ["wandb", "stdout"]
-def make_env(env_id, rank, seed=0):
-    def _init():
-        env = gym.make(env_id)
-        env.seed(seed + rank)
-        env = Monitor(env)
-        return env
-    return _init
-print(sys.argv)
-
-log_dir = os.path.join(
-            "output",
-            sys.argv[0].split(".")[0],
-            util.make_unique_timestamp(),
-        )
-os.makedirs(log_dir, exist_ok=True)
-print(sys.argv)
-if len(sys.argv) <2:
-    name = None
-else:
-    name = 'gail_' + sys.argv[1]
-
-wandb.init(project='good', sync_tensorboard=True, dir=log_dir, name=name)
-venv = DummyVecEnv([lambda: gym.make("CartPole-Const-v0")] * 8)
+venv = DummyVecEnv([lambda: gym.make("seals/CartPole-v0")] * 8)
 learner = PPO(
     env=venv,
     policy=MlpPolicy,
@@ -80,7 +78,7 @@ learner = PPO(
     ent_coef=0.0,
     learning_rate=0.0003,
     n_epochs=10,
-    # device='cpu'
+    device='cpu'
 )
 reward_net = BasicRewardNet(
     venv.observation_space, venv.action_space, normalize_input_layer=RunningNorm
@@ -95,23 +93,10 @@ gail_trainer = GAIL(
     reward_net=reward_net,
 )
 
-eval_env = DummyVecEnv([lambda: gym.make("CartPole-Const-v0")] * 1)
-eval_env.render(mode='human')
-
-checkpoint_interval=3
-def cb(round_num):
-    if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:
-        save(gail_trainer, os.path.join(log_dir, "checkpoints", f"{round_num:05d}"))
-        obs = eval_env.reset()
-        for i in range(500):
-            action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
-            obs, _, _, _= eval_env.step(action)
-            eval_env.render(mode='human')
-
 learner_rewards_before_training, _ = evaluate_policy(
     learner, venv, 100, return_episode_rewards=True
 )
-gail_trainer.train(1000000, callback=cb)  # Note: set to 300000 for better results
+gail_trainer.train(20000)  # Note: set to 300000 for better results
 learner_rewards_after_training, _ = evaluate_policy(
     learner, venv, 100, return_episode_rewards=True
 )

@@ -131,3 +131,16 @@ def peginhole_v1():
     num_vec = 16  # number of environments in VecEnv)
     )
     policy_type = "sac"
+
+
+@eval_policy_ex.named_config
+def cartpole_const():
+    common = dict(env_name="CartPole-Const-v0",
+    
+    max_episode_steps = 100,
+    num_vec = 4  # number of environments in VecEnv))
+    )
+
+    policy_type = "sac"
+
+    # policy_type = "sac"
