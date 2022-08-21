@@ -366,6 +366,57 @@ class ScaledRewardNet(RewardNet):
 
         return outputs * 10.0
 
+class PredefinedRewardNet(RewardNet):
+    """MLP that takes as input the state, action, next state and done flag.
+
+    These inputs are flattened and then concatenated to one another. Each input
+    can enabled or disabled by the `use_*` constructor keyword arguments.
+    """
+
+    def __init__(
+        self,
+        observation_space: gym.Space,
+        action_space: gym.Space,
+        reward_fn,
+        combined_size,
+        **kwargs,
+    ):
+        """Builds reward MLP.
+
+        Args:
+            observation_space: The observation space.
+            action_space: The action space.
+            use_state: should the current state be included as an input to the MLP?
+            use_action: should the current action be included as an input to the MLP?
+            use_next_state: should the next state be included as an input to the MLP?
+            use_done: should the "done" flag be included as an input to the MLP?
+            kwargs: passed straight through to `build_mlp`.
+        """
+        super().__init__(observation_space, action_space)
+        # combined_size = combined_size
+        self.reward_fn = reward_fn
+        full_build_mlp_kwargs = {
+            "hid_sizes": (32, 32),
+        }
+        full_build_mlp_kwargs.update(kwargs)
+        full_build_mlp_kwargs.update(
+            {
+                # we do not want these overridden
+                "in_size": combined_size,
+                "out_size": 1,
+                "squeeze_output": True,
+            },
+        )
+
+        self.mlp = networks.build_mlp(**full_build_mlp_kwargs)
+
+    def forward(self, state, action, next_state, done):
+        reward_form = self.reward_fn(state, action, next_state, done)
+        outputs = self.mlp(reward_form)
+        assert outputs.shape == state.shape[:1]
+
+        return outputs
+
 
 class BasicRewardNet(RewardNet):
     """MLP that takes as input the state, action, next state and done flag.
@@ -708,6 +759,151 @@ class ShapedScaledRewardNet(ShapedRewardNet):
             potential_net,
             discount_factor=discount_factor,
         )
+
+class ConstPredefinedRewardNet(PredefinedRewardNet):
+    """Shaped reward net based on MLPs.
+
+    This is just a very simple convenience class for instantiating a BasicRewardNet
+    and a BasicPotentialShaping and wrapping them inside a ShapedRewardNet.
+    Mainly exists for backwards compatibility after
+    https://github.com/HumanCompatibleAI/imitation/pull/311
+    to keep the scripts working.
+
+    TODO(ejnnr): if we ever modify AIRL so that it takes in a RewardNet instance
+        directly (instead of a class and kwargs) and instead instantiate the
+        RewardNet inside the scripts, then it probably makes sense to get rid
+        of this class.
+
+    """
+
+    def __init__(
+        self,
+        observation_space: gym.Space,
+        action_space: gym.Space,
+        const_fn,
+        *,
+        reward_hid_sizes: Sequence[int] = (32,),
+        potential_hid_sizes: Sequence[int] = (32, 32),
+        use_state: bool = True,
+        use_action: bool = True,
+        use_next_state: bool = False,
+        use_done: bool = False,
+        discount_factor: float = 0.99,
+        **kwargs,
+    ):
+        """Builds a simple shaped reward network.
+
+        Args:
+            observation_space: The observation space.
+            action_space: The action space.
+            reward_hid_sizes: sequence of widths for the hidden layers
+                of the base reward MLP.
+            potential_hid_sizes: sequence of widths for the hidden layers
+                of the potential MLP.
+            use_state: should the current state be included as an input
+                to the reward MLP?
+            use_action: should the current action be included as an input
+                to the reward MLP?
+            use_next_state: should the next state be included as an input
+                to the reward MLP?
+            use_done: should the "done" flag be included as an input to the reward MLP?
+            discount_factor: discount factor for the potential shaping.
+            kwargs: passed straight through to `BasicRewardNet` and `BasicPotentialMLP`.
+        """
+        base_reward_net = PredefinedRewardNet(
+            observation_space=observation_space,
+            action_space=action_space,
+            use_state=use_state,
+            use_action=use_action,
+            use_next_state=use_next_state,
+            use_done=use_done,
+            hid_sizes=reward_hid_sizes,
+            **kwargs,
+        )
+
+        potential_net = BasicPotentialMLP(
+            observation_space=observation_space,
+            hid_sizes=potential_hid_sizes,
+            **kwargs,
+        )
+
+        const_potential_net = BasicPotentialMLP(
+            observation_space=observation_space,
+            hid_sizes=potential_hid_sizes,
+            **kwargs,
+        )
+
+        super().__init__(
+            base_reward_net,
+            potential_net,
+            discount_factor=discount_factor,
+        )
+
+        self.const_potential = const_potential_net
+        self.scale = nn.Parameter(th.tensor(0.0, requires_grad=True))
+        self.bias = nn.Parameter(th.tensor(0.0, ))
+        self.const_fn = const_fn
+
+    def const(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+    ):
+        base_reward_net_output = self.const_fn(state, action, next_state, done)
+        assert base_reward_net_output.shape == state.shape[:1]
+        base_reward_net_output = self.scale * base_reward_net_output + self.bias
+        new_shaping_output = self.const_potential(next_state).flatten()
+        old_shaping_output = self.const_potential(state).flatten()
+
+        new_shaping = (1 - done.float()) * new_shaping_output
+        final_rew = (
+            base_reward_net_output
+            + self.discount_factor * new_shaping
+            - old_shaping_output
+        )
+        assert final_rew.shape == state.shape[:1]
+        return final_rew
+
+    def forward(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+    ):
+        base_reward_net_output = self.base(state, action, next_state, done)
+        new_shaping_output = self.potential(next_state).flatten()
+        old_shaping_output = self.potential(state).flatten()
+        # NOTE(ejnnr): We fix the potential of terminal states to zero, which is
+        # necessary for valid potential shaping in a variable-length horizon setting.
+        #
+        # In more detail: variable-length episodes are usually modeled
+        # as infinite-length episodes where we transition to a terminal state
+        # in which we then remain forever. The transition to this final
+        # state contributes gamma * Phi(s_T) - Phi(s_{T - 1}) to the returns,
+        # where Phi is the potential and s_T the final state. But on every step
+        # afterwards, the potential shaping leads to a reward of (gamma - 1) * Phi(s_T).
+        # The discounted series of these rewards, which is added to the return,
+        # is gamma / (1 - gamma) times this reward, i.e. just -gamma * Phi(s_T).
+        # This cancels the contribution of the final state to the last "real"
+        # transition, so instead of computing the infinite series, we can
+        # equivalently fix the final potential to zero without loss of generality.
+        # Not fixing the final potential to zero and also not adding this infinite
+        # series of remaining potential shapings can lead to reward shaping
+        # that does not preserve the optimal policy if the episodes have variable
+        # length!
+        new_shaping = (1 - done.float()) * new_shaping_output
+        final_rew = (
+            base_reward_net_output
+            + self.discount_factor * new_shaping
+            - old_shaping_output
+        )
+        assert final_rew.shape == state.shape[:1]
+        final_rew += self.const(state, action, next_state, done).detach
+        assert final_rew.shape == state.shape[:1]
+        return final_rew
 
 class ConstShapedRewardNet(ShapedRewardNet):
     """Shaped reward net based on MLPs.

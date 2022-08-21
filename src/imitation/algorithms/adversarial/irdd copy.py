@@ -32,6 +32,78 @@ from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 
 
+class RewardNetFromDiscriminatorLogit(reward_nets.RewardNet):
+    r"""Converts the discriminator logits raw value to a reward signal.
+
+    Wrapper for reward network that takes in the logits of the discriminator
+    probability distribution and outputs the corresponding reward for the GAIL
+    algorithm.
+
+    Below is the derivation of the transformation that needs to be applied.
+
+    The GAIL paper defines the cost function of the generator as:
+
+    .. math::
+
+        \log{D}
+
+    as shown on line 5 of Algorithm 1. In the paper, :math:`D` is the probability
+    distribution learned by the discriminator, where :math:`D(X)=1` if the trajectory
+    comes from the generator, and :math:`D(X)=0` if it comes from the expert.
+    In this implementation, we have decided to use the opposite convention that
+    :math:`D(X)=0` if the trajectory comes from the generator,
+    and :math:`D(X)=1` if it comes from the expert. Therefore, the resulting cost
+    function is:
+
+    .. math::
+
+        \log{(1-D)}
+
+    Since our algorithm trains using a reward function instead of a loss function, we
+    need to invert the sign to get:
+
+    .. math::
+
+        R=-\log{(1-D)}=\log{\frac{1}{1-D}}
+
+    Now, let :math:`L` be the output of our reward net, which gives us the logits of D
+    (:math:`L=\operatorname{logit}{D}`). We can write:
+
+    .. math::
+
+        D=\operatorname{sigmoid}{L}=\frac{1}{1+e^{-L}}
+
+    Since :math:`1-\operatorname{sigmoid}{(L)}` is the same as
+    :math:`\operatorname{sigmoid}{(-L)}`, we can write:
+
+    .. math::
+
+        R=-\log{\operatorname{sigmoid}{(-L)}}
+
+    which is a non-decreasing map from the logits of D to the reward.
+    """
+
+    def __init__(self, base: reward_nets.RewardNet):
+        """Builds LogSigmoidRewardNet to wrap `reward_net`."""
+        # TODO(adam): make an explicit RewardNetWrapper class?
+        super().__init__(
+            observation_space=base.observation_space,
+            action_space=base.action_space,
+            normalize_images=base.normalize_images,
+        )
+        self.base = base
+
+    def forward(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+    ) -> th.Tensor:
+        logits = self.base.forward(state, action, next_state, done)
+        return -F.logsigmoid(-logits)
+        # return th.exp(-2 * logits)
+
 class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
     """Base class for adversarial imitation learning algorithms like GAIL and AIRL."""
 
@@ -40,6 +112,7 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
 
     venv_train: vec_env.VecEnv
     """Like `self.venv`, but wrapped with train reward unless in debug mode.
+
     If `debug_use_ground_truth=True` was passed into the initializer then
     `self.venv_train` is the same as `self.venv`."""
 
@@ -66,6 +139,7 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         allow_variable_horizon: bool = False,
     ):
         """Builds AdversarialTrainer.
+
         Args:
             demonstrations: Demonstrations from an expert (optional). Transitions
                 expressed directly as a `types.TransitionsMinimal` object, a sequence
@@ -111,6 +185,10 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
                 https://imitation.readthedocs.io/en/latest/guide/variable_horizon.html
                 before overriding this.
         """
+        self._processed_reward = RewardNetFromDiscriminatorLogit(reward_net)
+        self._processed_constraint = RewardNetFromDiscriminatorLogit(constraint_net)
+
+
         self.demo_batch_size = demo_batch_size
         self._demo_data_loader = None
         self._endless_expert_iterator = None
@@ -207,22 +285,32 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         action: th.Tensor,
         next_state: th.Tensor,
         done: th.Tensor,
-        log_policy_act_prob: th.Tensor,
+        log_policy_act_prob: Optional[th.Tensor] = None,
     ) -> th.Tensor:
         r"""Compute the discriminator's logits for each state-action sample.
+
         In Fu's AIRL paper (https://arxiv.org/pdf/1710.11248.pdf), the
         discriminator output was given as
+
         .. math::
+
             D_{\theta}(s,a) =
             \frac{ \exp{r_{\theta}(s,a)} } { \exp{r_{\theta}(s,a)} + \pi(a|s) }
+
         with a high value corresponding to the expert and a low value corresponding to
         the generator.
+
         In other words, the discriminator output is the probability that the action is
         taken by the expert rather than the generator.
+
         The logit of the above is given as
+
         .. math::
+
             \operatorname{logit}(D_{\theta}(s,a)) = r_{\theta}(s,a) - \log{ \pi(a|s) }
+
         which is what is returned by this function.
+
         Args:
             state: The state of the environment at the time of the action.
             action: The action taken by the expert or generator.
@@ -231,19 +319,17 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
                 been reached.
             log_policy_act_prob: The log probability of the action taken by the
                 generator, :math:`\log{ \pi(a|s) }`.
+
         Returns:
             The logits of the discriminator for each state-action sample.
+
         Raises:
             TypeError: If `log_policy_act_prob` is None.
         """
-        if log_policy_act_prob is None:
-            raise TypeError(
-                "Non-None `log_policy_act_prob` is required for this method.",
-            )
-        reward_output_train = self._reward_net(state, action, next_state, done)
-
-        const_output_train = self._constraint_net(state, action, next_state, done)
-        return reward_output_train + const_output_train.detach() - log_policy_act_prob
+        del log_policy_act_prob
+        logits = self._reward_net(state, action, next_state, done) + self._constraint_net(state, action, next_state, done).detach()
+        assert logits.shape == state.shape[:1]
+        return logits
 
     def const_logits_expert_is_high(
         self,
@@ -253,37 +339,10 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         done: th.Tensor,
         const_log_policy_act_prob: th.Tensor,
     ) -> th.Tensor:
-        if const_log_policy_act_prob is None:
-            raise TypeError(
-                "Non-None `log_policy_act_prob` is required for this method.",
-            )
-        const_output_train = self._constraint_net(state, action, next_state, done)
-        return const_output_train - const_log_policy_act_prob
-
-    def rew_gen(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-        is_expert: th.Tensor, 
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert] + self._constraint_net(state, action, next_state, done)[~is_expert].detach()
-        return const_output_train.mean()
-
-    def rew_expert(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor,
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[is_expert] + self._constraint_net(state, action, next_state, done)[is_expert].detach()
-        reward = - const_output_train + 0.5 * const_output_train ** 2 
-        return reward.mean()
+        del const_log_policy_act_prob
+        logits = self._constraint_net(state, action, next_state, done)
+        assert logits.shape == state.shape[:1]
+        return logits
 
     def const_gen(
         self,
@@ -312,29 +371,18 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
 
     @property
     def reward_train(self) -> reward_nets.RewardNet:
-        return self._reward_net
+        return self._processed_reward
 
     @property
     def reward_test(self) -> reward_nets.RewardNet:
-        """Returns the unshaped version of reward network used for testing."""
-        reward_net = self._reward_net
-        # Recursively return the base network of the wrapped reward net
-        while isinstance(reward_net, reward_nets.RewardNetWrapper):
-            reward_net = reward_net.base
-        return reward_net
+        return self._processed_reward
 
     @property
     def constraint_train(self) -> reward_nets.RewardNet:
-        return self._constraint_net
-
+        return self._processed_constraint
     @property
     def constraint_test (self) -> reward_nets.RewardNet:
-        """Returns the unshaped version of reward network used for testing."""
-        reward_net = self._constraint_net
-        # Recursively return the base network of the wrapped reward net
-        while isinstance(reward_net, reward_nets.RewardNetWrapper):
-            reward_net = reward_net.base
-        return reward_net
+        return self._processed_constraint
 
     def set_demonstrations(self, demonstrations: base.AnyTransitions) -> None:
         self._demo_data_loader = base.make_data_loader(
@@ -353,6 +401,7 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         gen_samples: Optional[Mapping] = None,
     ) -> Optional[Mapping[str, float]]:
         """Perform a single discriminator update, optionally using provided samples.
+
         Args:
             expert_samples: Transition samples from the expert in dictionary form.
                 If provided, must contain keys corresponding to every field of the
@@ -365,6 +414,7 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
                 form as `expert_samples`. If provided, must contain exactly
                 `self.demo_batch_size` samples. If not provided, then take
                 `len(expert_samples)` samples from the generator replay buffer.
+
         Returns:
             Statistics for discriminator (e.g. loss, accuracy).
         """
@@ -384,52 +434,36 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["done"],
                 batch["log_policy_act_prob"],
             )
-            # loss = F.binary_cross_entropy_with_logits(
-            #     disc_logits,
-            #     batch["labels_expert_is_one"].float(),
-            # )
-            # loss = 
-            rew_loss_expert = self.rew_expert(
+            loss = F.binary_cross_entropy_with_logits(
+                disc_logits,
+                batch["labels_expert_is_one"].float(),
+            )
+            const_logits = self.const_logits_expert_is_high(
                 batch["state"],
-                batch["action"],
+                batch["const_action"],
                 batch["next_state"],
                 batch["done"],
-                batch["labels_expert_is_one"].long(),
+                batch["const_log_policy_act_prob"],
             )
-            rew_loss_gen = self.rew_gen(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
+            const_loss = F.binary_cross_entropy_with_logits(
+                const_logits,
+                batch["labels_expert_is_one"].float(),
             )
-            loss = rew_loss_expert + rew_loss_gen
-            # const_logits = self.const_logits_expert_is_high(
+            # const_loss_expert = self.const_expert(
             #     batch["state"],
             #     batch["const_action"],
             #     batch["next_state"],
             #     batch["done"],
-            #     batch["const_log_policy_act_prob"],
+            #     batch["labels_expert_is_one"].long(),
             # )
-            # const_loss = F.binary_cross_entropy_with_logits(
-            #     const_logits,
-            #     batch["labels_expert_is_one"].float(),
+            # const_loss_gen = self.const_gen(
+            #     batch["state"],
+            #     batch["const_action"],
+            #     batch["next_state"],
+            #     batch["done"],
+            #     batch["labels_expert_is_one"].long(),
             # )
-            const_loss_expert = self.const_expert(
-                batch["state"],
-                batch["const_action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-            )
-            const_loss_gen = self.const_gen(
-                batch["state"],
-                batch["const_action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-            )
-            const_loss = const_loss_expert + const_loss_gen
+            # const_loss = const_loss_expert + const_loss_gen
             loss += const_loss
             # do gradient step
 
@@ -473,8 +507,10 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         learn_kwargs: Optional[Mapping] = None,
     ) -> None:
         """Trains the generator to maximize the discriminator loss.
+
         After the end of training populates the generator replay buffer (used in
         discriminator training) with `self.disc_batch_size` transitions.
+
         Args:
             total_timesteps: The number of transitions to sample from
                 `self.venv_train` during training. By default,
@@ -507,10 +543,13 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         callback: Optional[Callable[[int], None]] = None,
     ) -> None:
         """Alternates between training the generator and discriminator.
+
         Every "round" consists of a call to `train_gen(self.gen_train_timesteps)`,
         a call to `train_disc`, and finally a call to `callback(round)`.
+
         Training ends once an additional "round" would cause the number of transitions
         sampled from the environment to exceed `total_timesteps`.
+
         Args:
             total_timesteps: An upper bound on the number of transitions to sample
                 from the environment during training.
@@ -545,9 +584,11 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         policy = None,
     ) -> Optional[th.Tensor]:
         """Evaluates the given actions on the given observations.
+
         Args:
             obs_th: A batch of observations.
             acts_th: A batch of actions.
+
         Returns:
             A batch of log policy action probabilities.
         """
@@ -586,12 +627,15 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         expert_samples: Optional[Mapping] = None,
     ) -> Mapping[str, th.Tensor]:
         """Build and return training batch for the next discriminator update.
+
         Args:
             gen_samples: Same as in `train_disc`.
             expert_samples: Same as in `train_disc`.
+
         Returns:
             The training batch: state, action, next state, dones, labels
             and policy log-probabilities.
+
         Raises:
             RuntimeError: Empty generator replay buffer.
             ValueError: `gen_samples` or `expert_samples` batch size is
@@ -708,12 +752,14 @@ def compute_train_stats(
     disc_loss: th.Tensor,
 ) -> Mapping[str, float]:
     """Train statistics for GAIL/AIRL discriminator.
+
     Args:
         disc_logits_expert_is_high: discriminator logits produced by
             `AdversarialTrainer.logits_expert_is_high`.
         labels_expert_is_one: integer labels describing whether logit was for an
             expert (0) or generator (1) sample.
         disc_loss: final discriminator loss.
+
     Returns:
         A mapping from statistic names to float values.
     """
