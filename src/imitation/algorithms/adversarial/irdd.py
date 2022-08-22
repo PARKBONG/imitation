@@ -310,6 +310,20 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         reward = - const_output_train + 0.5 * const_output_train ** 2 
         return reward.mean()
 
+    def reg(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor, 
+    ):
+        rew_output = self._reward_net(state, action, next_state, done) 
+        const_output =  self._constraint_net(state, action, next_state, done)
+        reg1 = 0.1 * (rew_output**2).mean()
+        reg2 = 0.1 * (const_output**2).mean()
+        return reg1 + reg2
+
     @property
     def reward_train(self) -> reward_nets.RewardNet:
         return self._reward_net
@@ -430,7 +444,31 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["labels_expert_is_one"].long(),
             )
             const_loss = const_loss_expert + const_loss_gen
-            loss += const_loss
+
+            const_loss_expert2 = self.const_expert(
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+            )
+            const_loss_gen2 = self.const_gen(
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+            )
+            const_loss2 =const_loss_expert2 + const_loss_gen2
+
+            reg_loss =self.reg(
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(), 
+            )
+            loss += const_loss + reg_loss
             # do gradient step
 
             """

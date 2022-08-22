@@ -106,7 +106,7 @@ if __name__ == '__main__':
         demonstrations=rollouts,
         demo_batch_size=1024,
         gen_replay_buffer_capacity=2048,
-        n_disc_updates_per_round=20,
+        n_disc_updates_per_round=10,
         venv=venv,
         gen_algo=learner,
         reward_net=reward_net,
