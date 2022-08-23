@@ -18,6 +18,7 @@ from imitation.policies import serialize
 from imitation.scripts.common import common as common_config
 from imitation.scripts.common import demonstrations, reward, rl, train
 from imitation.scripts.config.train_adversarial import train_adversarial_ex
+from imitation.rewards.reward_nets import RewardNetWrapper
 
 logger = logging.getLogger("imitation.scripts.train_adversarial")
 
@@ -30,8 +31,14 @@ def save(trainer, save_path):
     th.save(trainer.reward_train, os.path.join(save_path, "reward_train.pt"))
     th.save(trainer.reward_test, os.path.join(save_path, "reward_test.pt"))
     if hasattr(trainer, "constraint_train"):
-        th.save(trainer.constraint_train.mlp, os.path.join(save_path, "constraint_train.pt"))
-        th.save(trainer.constraint_test.mlp, os.path.join(save_path, "constraint_test.pt"))
+        saving_net_train = trainer.constraint_train
+        saving_net_test = trainer.constraint_test
+        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
+            saving_net_train = saving_net_train.base
+        while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
+            saving_net_test = saving_net_test.base
+        th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_test.pt"))
+        th.save(saving_net_test.mlp, os.path.join(save_path, "constraint_train.pt"))
     serialize.save_stable_model(
         os.path.join(save_path, "gen_policy"),
         trainer.gen_algo,

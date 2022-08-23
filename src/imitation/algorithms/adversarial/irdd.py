@@ -312,17 +312,16 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
 
     def reg(
         self,
+        net,
         state: th.Tensor,
         action: th.Tensor,
         next_state: th.Tensor,
         done: th.Tensor, 
         is_expert: th.Tensor, 
     ):
-        rew_output = self._reward_net(state, action, next_state, done) 
-        const_output =  self._constraint_net(state, action, next_state, done)
+        rew_output = net(state, action, next_state, done) 
         reg1 = 0.1 * (rew_output**2).mean()
-        reg2 = 0.1 * (const_output**2).mean()
-        return reg1 + reg2
+        return reg1 #+ reg2
 
     @property
     def reward_train(self) -> reward_nets.RewardNet:
@@ -382,6 +381,8 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
         Returns:
             Statistics for discriminator (e.g. loss, accuracy).
         """
+        self._reward_net.train()
+        self._constraint_net.train()
         with self.logger.accumulate_means("disc"):
             # optionally write TB summaries for collected ops
             write_summaries = self._init_tensorboard and self._global_step % 20 == 0
@@ -462,13 +463,25 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
             const_loss2 =const_loss_expert2 + const_loss_gen2
 
             reg_loss =self.reg(
+                self._reward_net,
                 batch["state"],
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
                 batch["labels_expert_is_one"].long(), 
             )
-            loss += const_loss + reg_loss
+
+            reg_loss2 =self.reg(
+                self._constraint_net,
+                batch["state"],
+                batch["const_action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(), 
+            )
+            loss += const_loss 
+            loss += 2*(reg_loss + reg_loss2)
+            loss += const_loss2*0.1
             # do gradient step
 
             """
@@ -503,6 +516,8 @@ class IRDD(base.DemonstrationAlgorithm[types.Transitions]):
             if write_summaries:
                 self._summary_writer.add_histogram("disc_logits", disc_logits.detach())
 
+        self._reward_net.eval()
+        self._constraint_net.eval()
         return train_stats
 
     def train_gen(

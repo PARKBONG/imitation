@@ -379,6 +379,7 @@ class PredefinedRewardNet(RewardNet):
         action_space: gym.Space,
         reward_fn,
         combined_size,
+        use_action = True,
         **kwargs,
     ):
         """Builds reward MLP.
@@ -393,7 +394,11 @@ class PredefinedRewardNet(RewardNet):
             kwargs: passed straight through to `build_mlp`.
         """
         super().__init__(observation_space, action_space)
-        # combined_size = combined_size
+        combined_size = combined_size
+
+        self.use_action = use_action
+        if self.use_action:
+            combined_size += preprocessing.get_flattened_obs_dim(action_space)
         self.reward_fn = reward_fn
         full_build_mlp_kwargs = {
             "hid_sizes": (32, 32),
@@ -412,9 +417,22 @@ class PredefinedRewardNet(RewardNet):
 
     def forward(self, state, action, next_state, done):
         reward_form = self.reward_fn(state, action, next_state, done)
-        outputs = self.mlp(reward_form)
-        assert outputs.shape == state.shape[:1]
 
+        inputs = []
+        inputs.append(reward_form)
+        # if self.use_state:
+        #     inputs.append(th.flatten(state, 1))
+        if self.use_action:
+            inputs.append(th.flatten(action, 1))
+        # if self.use_next_state:
+        #     inputs.append(th.flatten(next_state, 1))
+        # if self.use_done:
+        #     inputs.append(th.reshape(done, [-1, 1]))
+
+        inputs_concat = th.cat(inputs, dim=1)
+
+        outputs = self.mlp(inputs_concat)
+        assert outputs.shape == state.shape[:1]
         return outputs
 
 
@@ -498,6 +516,66 @@ class BasicRewardNet(RewardNet):
 
         return outputs
 
+class DropoutRewardNet(RewardNetWrapper):
+    """A reward net that normalizes the output of its base network."""
+
+    def __init__(
+        self,
+        base: RewardNet,
+        # normalize_output_layer: Type[nn.Module],
+        p,
+    ):
+        """Initialize the NormalizedRewardNet.
+
+        Args:
+            base: a base RewardNet
+            normalize_output_layer: The class to use to normalize rewards. This
+                can be any nn.Module that preserves the shape; e.g. `nn.Identity`,
+                `nn.LayerNorm`, or `networks.RunningNorm`.
+        """
+        # Note(yawen): by default, the reward output is squeezed to produce
+        # tensors with (N,) shape for predict_processed. This works for
+        # `networks.RunningNorm`, but not for `nn.BatchNorm1d` that requires
+        # shape of (N,C).
+        super().__init__(base=base)
+        # Assuming reward is scalar, norm layer should be initialized with shape (1,).
+        self.normalize_output_layer = nn.Dropout(p=p)
+
+    def predict_processed(
+        self,
+        state: np.ndarray,
+        action: np.ndarray,
+        next_state: np.ndarray,
+        done: np.ndarray,
+        # update_stats: bool = True,
+        **kwargs,
+    ) -> np.ndarray:
+        """Compute normalized rewards for a batch of transitions without gradients.
+
+        Args:
+            state: Current states of shape `(batch_size,) + state_shape`.
+            action: Actions of shape `(batch_size,) + action_shape`.
+            next_state: Successor states of shape `(batch_size,) + state_shape`.
+            done: End-of-episode (terminal state) indicator of shape `(batch_size,)`.
+            update_stats: Whether to update the running stats of the normalization
+                layer.
+            **kwargs: kwargs passed to base predict_processed call.
+
+        Returns:
+            Computed normalized rewards of shape `(batch_size,`).
+        """
+        with networks.evaluating(self):
+            # switch to eval mode (affecting normalization, dropout, etc)
+            rew_th = th.tensor(
+                self.base.predict_processed(state, action, next_state, done, **kwargs),
+                device=self.device,
+            )
+            rew = self.normalize_output_layer(rew_th).detach().cpu().numpy().flatten()
+        # if update_stats:
+        #     with th.no_grad():
+        #         self.normalize_output_layer.update_stats(rew_th)
+        assert rew.shape == state.shape[:1]
+        return rew
 
 class NormalizedRewardNet(RewardNetWrapper):
     """A reward net that normalizes the output of its base network."""

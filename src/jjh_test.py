@@ -29,7 +29,7 @@ import sys
 from imitation.scripts.train_adversarial import save
 
 from imitation.util import util
-with open('../jjh_data/expert_models/cartpole_const/final2.pkl', 'rb') as f:
+with open('../jjh_data/expert_models/cartpole_const/final3.pkl', 'rb') as f:
     rollouts = types.load(f)
 #%%
 from imitation.algorithms.adversarial.gail import GAIL
