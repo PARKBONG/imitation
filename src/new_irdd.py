@@ -3,10 +3,12 @@ from imitation.algorithms.adversarial.gail import GAIL
 from imitation.algorithms.adversarial.airl import AIRL 
 
 from imitation.algorithms.adversarial.irdd import IRDD 
+from imitation.algorithms.adversarial.irdd2 import IRDD2
 from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
 from imitation.util.networks import RunningNorm
 # from stable_baselines3 import PPO
 from sb3_contrib import PPO
+from sb3_contrib import PPO2
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
@@ -24,7 +26,7 @@ import os
 import logging
 import sys
 from imitation.util import util
-from imitation.scripts.train_adversarial import save
+# from imitation.scripts.train_adversarial import save
 import torch.nn as nn
 import torch as th
 import numpy as np
@@ -34,14 +36,46 @@ from scipy import ndimage
 with open('../jjh_data/expert_models/cartpole_const/final3.pkl', 'rb') as f:
     rollouts = types.load(f)
 
+def save(trainer, save_path):
+    """Save discriminator and generator."""
+    # We implement this here and not in Trainer since we do not want to actually
+    # serialize the whole Trainer (including e.g. expert demonstrations).
+    os.makedirs(save_path, exist_ok=True)
+    th.save(trainer.reward_train, os.path.join(save_path, "reward_train.pt"))
+    th.save(trainer.reward_test, os.path.join(save_path, "reward_test.pt"))
+
+    if hasattr(trainer, "primary_train"):
+        saving_net_train = trainer.primary_train
+        saving_net_test = trainer.primary_test
+        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
+            saving_net_train = saving_net_train.base
+        while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
+            saving_net_test = saving_net_test.base
+        th.save(saving_net_train.mlp, os.path.join(save_path, "primary_train.pt"))
+        th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
+
+    if hasattr(trainer, "constraint_train"):
+        saving_net_train = trainer.constraint_train
+        saving_net_test = trainer.constraint_test
+        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
+            saving_net_train = saving_net_train.base
+        while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
+            saving_net_test = saving_net_test.base
+        th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_test.pt"))
+        th.save(saving_net_test.mlp, os.path.join(save_path, "constraint_train.pt"))
+    serialize.save_stable_model(
+        os.path.join(save_path, "gen_policy"),
+        trainer.gen_algo,
+    )
+
 def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_wandb=False, ):
     import seaborn as sns
     import matplotlib.pyplot as plt
     env = gym.make(env_id)
-    grid_size = 0.05
+    grid_size = 0.025
     rescale = 1./grid_size
-    boundary_low = -2.0
-    boundary_high = 2.0
+    boundary_low = -1.0
+    boundary_high = 1.0
     barrier_range = [0.2, 0.6]
     barrier_y = 0.3
 
@@ -152,7 +186,7 @@ if __name__ == '__main__':
     )
     #venv = DummyVecEnv([lambda: gym.make("Gripper-v0")] * 4)
     venv = SubprocVecEnv( [make_env("CartPole-Const-v0", i) for i in range(8)])
-    learner = PPO(
+    learner = PPO2(
         env=venv,
         policy=MlpPolicy,
         batch_size=64,
@@ -183,7 +217,12 @@ if __name__ == '__main__':
         hid_sizes=[16, 16],
 
     )
-    constraint_net = PredefinedRewardNet(
+    constraint_net = BasicRewardNet(
+        venv.observation_space, venv.action_space, normalize_input_layer=RunningNorm,
+        hid_sizes=[16, 16],
+
+    )
+    primary_net = PredefinedRewardNet(
         venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=2,normalize_input_layer=RunningNorm, #RunningNorm,
         hid_sizes=[16, 16],
         # potential_hid_sizes=[8, 8],
@@ -192,7 +231,7 @@ if __name__ == '__main__':
     #     venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
     #     potential_hid_sizes=[8, 8],
     # )
-    gail_trainer = IRDD(
+    gail_trainer = IRDD2(
         demonstrations=rollouts,
         demo_batch_size=1024,
         gen_replay_buffer_capacity=2048,
@@ -202,6 +241,7 @@ if __name__ == '__main__':
         reward_net=reward_net,
         # disc_opt_kwargs={"lr":0.001},
         log_dir=log_dir,
+        primary_net=primary_net,
         constraint_net=constraint_net,
         disc_opt_cls=th.optim.AdamW,
         # const_disc_opt_kwargs={"lr":0.001}
@@ -224,8 +264,8 @@ if __name__ == '__main__':
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
                 eval_env.render(mode='human')
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir, round_num, "primary", True, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, "CartPole-Const-v0",log_dir,  round_num, "constraint", True, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir, round_num, "constraint", True, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, "CartPole-Const-v0",log_dir,  round_num, "primary", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )
     gail_trainer.train(int(10e6), callback=cb)  # Note: set to 300000 for better results
     learner_rewards_after_training, _ = evaluate_policy(
