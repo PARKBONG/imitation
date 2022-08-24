@@ -99,6 +99,7 @@ def eval_policy(
 
     try:
         if render:
+            venv.render(mode='human')
             venv = InteractiveRender(venv, render_fps)
 
         if reward_type is not None:
