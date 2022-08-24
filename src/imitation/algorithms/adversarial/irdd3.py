@@ -32,7 +32,7 @@ from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 
 
-class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
+class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
     """Base class for adversarial imitation learning algorithms like GAIL and AIRL."""
 
     venv: vec_env.VecEnv
@@ -132,7 +132,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
         self._reward_net = reward_net.to(gen_algo.device)
 
         self._primary_net = primary_net.to(gen_algo.device)
-        self._constraint_net = constraint_net.to(gen_algo.device)
+        # self._constraint_net = constraint_net.to(gen_algo.device)
 
         self._log_dir = log_dir
 
@@ -144,24 +144,24 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
         self._init_tensorboard = init_tensorboard
         self._init_tensorboard_graph = init_tensorboard_graph
         self._disc_opt = []
-        # self._disc_opt.append(
-        #     self._disc_opt_cls(
-        #         self._reward_net.parameters(),
-        #         **self._disc_opt_kwargs,
-        #     )
-        # )
+        self._disc_opt.append(
+            self._disc_opt_cls(
+                self._reward_net.parameters(),
+                **self._disc_opt_kwargs,
+            )
+        )
         self._disc_opt.append(
             self._disc_opt_cls(
                 self._primary_net.parameters(),
                 **self._primary_disc_opt_kwargs,
             )
         )
-        self._disc_opt.append(
-            self._disc_opt_cls(
-                self._constraint_net.parameters(),
-                **self._const_disc_opt_kwargs,
-            )
-        )
+        # self._disc_opt.append(
+        #     self._disc_opt_cls(
+        #         self._constraint_net.parameters(),
+        #         **self._const_disc_opt_kwargs,
+        #     )
+        # )
         
         if self._init_tensorboard:
             logging.info("building summary directory at " + self._log_dir)
@@ -179,11 +179,11 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
             venv = self.venv_wrapped = reward_wrapper.PrimaryConstRewardVecEnvWrapper(
                 venv,
                 # reward_fn=self.reward_train.predict_processed,
-                reward_fn= lambda *args:  self.primary_train.predict_processed(*args) +self.constraint_train.predict_processed (*args),
-                primary_fn= lambda *args: 1.1 * self.primary_train.predict_processed(*args) - 0.1 *self.constraint_train.predict_processed(*args),
-                constraint_fn= lambda *args: 1.1 * self.constraint_train.predict_processed(*args) - 0.1 * self.primary_train.predict_processed(*args),
-                #primary_fn=self.primary_train.predict_processed,
-                #constraint_fn=self.constraint_train.predict_processed,
+                reward_fn= lambda *args:  self.reward_train.predict_processed(*args),# +self.constraint_train.predict_processed (*args),
+                # primary_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 *self.constraint_train.predict_processed(*args),
+                constraint_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
+                primary_fn=self.primary_train.predict_processed,
+                # constraint_fn=self.constraint_train.predict_processed,
             )
             self.gen_callback = self.venv_wrapped.make_log_callback()
         self.venv_train = self.venv_wrapped
@@ -260,9 +260,10 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
             )
         #reward_output_train = self._reward_net(state, action, next_state, done)
 
-        primary_output_train = self._primary_net(state, action, next_state, done)
-        const_output_train = self._constraint_net(state, action, next_state, done)
-        return primary_output_train + const_output_train.detach() - log_policy_act_prob
+        primary_output_train = self._reward_net(state, action, next_state, done)
+        # const_output_train = self._constraint_net(state, action, next_state, done)
+        # return primary_output_train + const_output_train.detach() - log_policy_act_prob
+        return primary_output_train - log_policy_act_prob
 
     def const_logits_expert_is_high(
         self,
@@ -288,7 +289,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
         is_expert: th.Tensor, 
     ):
 
-        const_output_train = self._primary_net(state, action, next_state, done)[~is_expert] + self._constraint_net(state, action, next_state, done)[~is_expert]
+        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert]# + self._constraint_net(state, action, next_state, done)[~is_expert]
         return const_output_train.mean()
 
     def rew_expert(
@@ -300,7 +301,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
         is_expert: th.Tensor,
     ):
 
-        const_output_train = self._primary_net(state, action, next_state, done)[is_expert] + self._constraint_net(state, action, next_state, done)[is_expert]
+        const_output_train = self._reward_net(state, action, next_state, done)[is_expert] #+ self._constraint_net(state, action, next_state, done)[is_expert]
         reward = - const_output_train + 0.5 * const_output_train ** 2 
         return reward.mean()
 
@@ -339,7 +340,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
         is_expert: th.Tensor, 
     ):
 
-        const_output_train = self._constraint_net(state, action, next_state, done)[~is_expert]
+        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert].detach() -self._primary_net(state, action, next_state, done)[~is_expert]
         return const_output_train.mean()
 
     def const_expert(
@@ -351,7 +352,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
         is_expert: th.Tensor,
     ):
 
-        const_output_train = self._constraint_net(state, action, next_state, done)[is_expert]
+        const_output_train = self._reward_net(state, action, next_state, done)[is_expert].detach()-self._primary_net(state, action, next_state, done)[is_expert]
         reward = - const_output_train + 0.5 * const_output_train ** 2 
         return reward.mean()
 
@@ -395,18 +396,18 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
         return reward_net
 
 
-    @property
-    def constraint_train(self) -> reward_nets.RewardNet:
-        return self._constraint_net
+    # @property
+    # def constraint_train(self) -> reward_nets.RewardNet:
+    #     return self._constraint_net
 
-    @property
-    def constraint_test (self) -> reward_nets.RewardNet:
-        """Returns the unshaped version of reward network used for testing."""
-        reward_net = self._constraint_net
-        # Recursively return the base network of the wrapped reward net
-        while isinstance(reward_net, reward_nets.RewardNetWrapper):
-            reward_net = reward_net.base
-        return reward_net
+    # @property
+    # def constraint_test (self) -> reward_nets.RewardNet:
+    #     """Returns the unshaped version of reward network used for testing."""
+    #     reward_net = self._constraint_net
+    #     # Recursively return the base network of the wrapped reward net
+    #     while isinstance(reward_net, reward_nets.RewardNetWrapper):
+    #         reward_net = reward_net.base
+    #     return reward_net
 
     def set_demonstrations(self, demonstrations: base.AnyTransitions) -> None:
         self._demo_data_loader = base.make_data_loader(
@@ -442,7 +443,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
         """
         self._reward_net.train()
         self._primary_net.train()
-        self._constraint_net.train()
+        # self._constraint_net.train()
         with self.logger.accumulate_means("disc"):
             # optionally write TB summaries for collected ops
             write_summaries = self._init_tensorboard and self._global_step % 20 == 0
@@ -478,7 +479,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["done"],
                 batch["labels_expert_is_one"].long(),
             )
-            loss = 1.*(rew_loss_expert + rew_loss_gen)
+            loss = (rew_loss_expert + rew_loss_gen)
 
             primary_loss_expert = self.primary_expert(
                 batch["state"],
@@ -512,21 +513,6 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
             )
             const_loss = const_loss_expert + const_loss_gen
 
-            const_loss_expert2 = self.const_expert(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-            )
-            const_loss_gen2 = self.const_gen(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-            )
-            #const_loss2 =const_loss_expert2 + const_loss_gen2
 
             reg_loss =self.reg(
                 self._reward_net,
@@ -545,18 +531,9 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["done"],
                 batch["labels_expert_is_one"].long(), 
             )
-            reg_loss3 =self.reg(
-                self._constraint_net,
-                batch["state"],
-                batch["const_action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(), 
-            )
-
             loss += 0.5*primary_loss 
             loss += 0.5*const_loss 
-            loss += 0.5*(reg_loss3 + reg_loss2)
+            loss += 0.1*(reg_loss  + reg_loss2)
             #loss += const_loss2*0.1
             # do gradient step
 
@@ -588,7 +565,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
 
         self._reward_net.eval()
         self._primary_net.eval()
-        self._constraint_net.eval()
+        # self._constraint_net.eval()
         return train_stats
 
     def train_gen(
@@ -828,7 +805,7 @@ class IRDD2(base.DemonstrationAlgorithm[types.Transitions]):
             next_obs,
             dones,
         )
-        _, const_acts_th, _, _ = self.constraint_train.preprocess(
+        _, const_acts_th, _, _ = self.reward_train.preprocess(
             obs,
             const_acts,
             next_obs,

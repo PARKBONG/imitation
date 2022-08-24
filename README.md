@@ -1,16 +1,3 @@
-[![CircleCI](https://circleci.com/gh/HumanCompatibleAI/imitation.svg?style=svg)](https://circleci.com/gh/HumanCompatibleAI/imitation)
-[![Documentation Status](https://readthedocs.org/projects/imitation/badge/?version=latest)](https://imitation.readthedocs.io/en/latest/?badge=latest)
-[![codecov](https://codecov.io/gh/HumanCompatibleAI/imitation/branch/master/graph/badge.svg)](https://codecov.io/gh/HumanCompatibleAI/imitation)
-[![PyPI version](https://badge.fury.io/py/imitation.svg)](https://badge.fury.io/py/imitation)
-
-
-# Imitation Learning Baseline Implementations
-
-This project aims to provide clean implementations of imitation and reward learning algorithms.
-Currently, we have implementations of Behavioral Cloning, [DAgger](https://arxiv.org/pdf/1011.0686.pdf) (with synthetic examples), density-based reward modeling, [Maximum Causal Entropy Inverse Reinforcement Learning](https://www.cs.cmu.edu/~bziebart/publications/maximum-causal-entropy.pdf), [Adversarial Inverse Reinforcement Learning](https://arxiv.org/abs/1710.11248), [Generative Adversarial Imitation Learning](https://arxiv.org/abs/1606.03476) and [Deep RL from Human Preferences](https://arxiv.org/abs/1706.03741).
-
-Read [the documentation here](https://imitation.readthedocs.io/en/latest/).
-
 ## Installation:
 
 ### Installing PyPI release
@@ -26,17 +13,23 @@ git clone http://github.com/HumanCompatibleAI/imitation
 cd imitation
 pip install -e .
 ```
+## Quickstart:
 
-### Optional Mujoco Dependency:
+### Generating a new rollouts
 
-Follow instructions to install [mujoco\_py v1.5 here](https://github.com/openai/mujoco-py/tree/498b451a03fb61e5bdfcb6956d8d7c881b1098b5#install-mujoco).
+```bash
+python3 -m imitation.scripts.eval_policy with [env] \
+policy_type=[policy_type] \
+policy_path=[model_dir] \
+rollout_save_path=[rollout_dir] \
+render
 
-
-## CLI Quickstart:
-
-We provide several CLI scripts as a front-end to the algorithms implemented in `imitation`. These use [Sacred](https://github.com/idsia/sacred) for configuration and replicability.
-
-From [examples/quickstart.sh:](examples/quickstart.sh)
+python3 -m imitation.scripts.eval_policy with gripper \
+policy_type=sac_custom \
+policy_path=jjh_data/expert_models/gripper_v1/model.zip \
+rollout_save_path=jjh_data/expert_models/gripper_v1/final.pkl \
+render
+```
 
 ```bash
 # Train PPO agent on pendulum and collect expert demonstrations. Tensorboard logs saved in quickstart/rl/

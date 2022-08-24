@@ -4,6 +4,7 @@ from imitation.algorithms.adversarial.airl import AIRL
 
 from imitation.algorithms.adversarial.irdd import IRDD 
 from imitation.algorithms.adversarial.irdd2 import IRDD2
+from imitation.algorithms.adversarial.irdd3 import IRDD3
 from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
 from imitation.util.networks import RunningNorm
 # from stable_baselines3 import PPO
@@ -233,7 +234,7 @@ if __name__ == '__main__':
     #     venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
     #     potential_hid_sizes=[8, 8],
     # )
-    gail_trainer = IRDD2(
+    gail_trainer = IRDD3(
         demonstrations=rollouts,
         demo_batch_size=1024,
         gen_replay_buffer_capacity=2048,
@@ -266,7 +267,7 @@ if __name__ == '__main__':
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
                 eval_env.render(mode='human')
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir, round_num, "constraint", True, )
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), "CartPole-Const-v0",log_dir, round_num, "constraint", True, )
             visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, "CartPole-Const-v0",log_dir,  round_num, "primary", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )
     gail_trainer.train(int(10e6), callback=cb)  # Note: set to 300000 for better results
