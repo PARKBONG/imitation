@@ -188,21 +188,21 @@ if __name__ == '__main__':
         format_strs=log_format_strs,
     )
     #venv = DummyVecEnv([lambda: gym.make("Gripper-v0")] * 4)
-    num_cpu=4
+    num_cpu=16
     venv = SubprocVecEnv( [make_env("Gripper-v1", i) for i in range(num_cpu)])
     learner = PPO2(
         env=venv,
         policy=MlpPolicy,
-        batch_size=64,
+        batch_size=128,
         # n_steps=512,
-        ent_coef=0.01,
+        ent_coef=0.001,
         learning_rate=0.0003,
-        #n_epochs=80,
+        # n_epochs=0,
         # n_epochs=20,
-        n_steps=int(2 * 50 * num_cpu),
-        policy_kwargs={'optimizer_class':th.optim.AdamW},
+        n_steps=int(2*50),
+        policy_kwargs={'optimizer_class':th.optim.Adam},
         tensorboard_log='./logs/',
-        device='cpu',
+        device='cuda',
     )
     print(learner.n_epochs)
     def reward_fn(s, a, ns, d):
@@ -218,17 +218,17 @@ if __name__ == '__main__':
     )
     reward_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,#RunningNorm,
-        hid_sizes=[8, 8],
+        # hid_sizes=[8, 8],
 
     )
     constraint_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,#RunningNorm,
-        hid_sizes=[8, 8],
+        # hid_sizes=[8, 8],
 
     )
     primary_net = PredefinedRewardNet(
         venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=3,normalize_input_layer=None, #RunningNorm, #RunningNorm,
-        hid_sizes=[8, 8],
+        # hid_sizes=[8, 8],
         # potential_hid_sizes=[8, 8],
     )
     # reward_net = ShapedScaledRewardNet(
@@ -238,8 +238,8 @@ if __name__ == '__main__':
     gail_trainer = IRDD3(
         demonstrations=rollouts,
         demo_batch_size=2*50*num_cpu,
-        gen_replay_buffer_capacity=4 * 50 * num_cpu,
-        n_disc_updates_per_round=1,
+        gen_replay_buffer_capacity=4*50*num_cpu,
+        n_disc_updates_per_round=10,
         venv=venv,
         gen_algo=learner,
         reward_net=reward_net,
@@ -247,7 +247,7 @@ if __name__ == '__main__':
         log_dir=log_dir,
         primary_net=primary_net,
         constraint_net=constraint_net,
-        disc_opt_cls=th.optim.AdamW,
+        disc_opt_cls=th.optim.Adam,
         # const_disc_opt_kwargs={"lr":0.001}
         custom_logger=custom_logger
     )
@@ -258,7 +258,7 @@ if __name__ == '__main__':
     # print(learner_rewards_before_training)
 
     eval_env = DummyVecEnv([lambda: gym.make("Gripper-v1")] * 1)
-    eval_env.render(mode='human')
+    # eval_env.render(mode='human')
     checkpoint_interval=10
     def cb(round_num):
         if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:
@@ -267,7 +267,7 @@ if __name__ == '__main__':
             for i in range(200):
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
-                eval_env.render(mode='human')
+                # eval_env.render(mode='human')
             # visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), "CartPole-Const-v0",log_dir, round_num, "constraint", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, "CartPole-Const-v0",log_dir,  round_num, "primary", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )

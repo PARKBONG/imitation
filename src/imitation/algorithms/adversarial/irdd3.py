@@ -753,7 +753,7 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
             # Convert to pytorch tensor or to TensorDict
             obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
             actions, values, log_probs = self.const_policy(obs_tensor)
-            actions = actions.detach().numpy()
+            actions = actions.detach().cpu().numpy()
             assert actions.shape == gen_samples["acts"].shape
         const_acts = np.concatenate([expert_samples["acts"], actions])
 
@@ -762,7 +762,7 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
             # Convert to pytorch tensor or to TensorDict
             obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
             primary_actions, values, log_probs = self.primary_policy(obs_tensor)
-            primary_actions = primary_actions.detach().numpy()
+            primary_actions = primary_actions.detach().cpu().numpy()
             assert primary_actions.shape == gen_samples["acts"].shape
         primary_acts = np.concatenate([expert_samples["acts"], primary_actions])
 
