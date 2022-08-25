@@ -299,6 +299,7 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         next_state: th.Tensor,
         done: th.Tensor, 
         is_expert: th.Tensor,
+
     ):
 
         const_output_train = self._reward_net(state, action, next_state, done)[is_expert] #+ self._constraint_net(state, action, next_state, done)[is_expert]
@@ -312,9 +313,15 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         next_state: th.Tensor,
         done: th.Tensor,
         is_expert: th.Tensor, 
+        log_policy_act_prob: th.Tensor,
+        primary_log_policy_act_prob: th.Tensor,
+        clip_range: float = 0.2,
+        #clip_range: Union[float, Schedule] = 0.2,
     ):
 
         const_output_train = self._primary_net(state, action, next_state, done)[~is_expert]
+        ratio = th.exp(primary_log_policy_act_prob - log_policy_act_prob)
+        const_output_train = const_output_train * ratio
         return const_output_train.mean()
 
     def primary_expert(
@@ -325,7 +332,6 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         done: th.Tensor, 
         is_expert: th.Tensor,
     ):
-
         const_output_train = self._primary_net(state, action, next_state, done)[is_expert]
         reward = - const_output_train + 0.5 * const_output_train ** 2 
         return reward.mean()
@@ -338,9 +344,15 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         next_state: th.Tensor,
         done: th.Tensor,
         is_expert: th.Tensor, 
+        log_policy_act_prob: th.Tensor,
+        constraint_log_policy_act_prob: th.Tensor,
+        clip_range: float = 0.2,
+        #clip_range: Union[float, Schedule] = 0.2,
     ):
 
         const_output_train = self._reward_net(state, action, next_state, done)[~is_expert].detach() -self._primary_net(state, action, next_state, done)[~is_expert]
+        ratio = th.exp(constraint_log_policy_act_prob - log_policy_act_prob)
+        const_output_train = const_output_train * ratio
         return const_output_train.mean()
 
     def const_expert(
@@ -483,33 +495,37 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
 
             primary_loss_expert = self.primary_expert(
                 batch["state"],
-                batch["primary_action"],
+                batch["action"],
                 batch["next_state"],
                 batch["done"],
                 batch["labels_expert_is_one"].long(),
             )
             primary_loss_gen = self.primary_gen(
                 batch["state"],
-                batch["primary_action"],
+                batch["action"],
                 batch["next_state"],
                 batch["done"],
                 batch["labels_expert_is_one"].long(),
+                batch["log_policy_act_prob"],
+                batch["primary_log_policy_act_prob"],
             )
             primary_loss = primary_loss_expert + primary_loss_gen
 
             const_loss_expert = self.const_expert(
                 batch["state"],
-                batch["const_action"],
+                batch["action"],
                 batch["next_state"],
                 batch["done"],
                 batch["labels_expert_is_one"].long(),
             )
             const_loss_gen = self.const_gen(
                 batch["state"],
-                batch["const_action"],
+                batch["action"],
                 batch["next_state"],
                 batch["done"],
                 batch["labels_expert_is_one"].long(),
+                batch["log_policy_act_prob"],
+                batch["const_log_policy_act_prob"],
             )
             const_loss = const_loss_expert + const_loss_gen
 
@@ -526,14 +542,23 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
             reg_loss2 =self.reg(
                 self._primary_net,
                 batch["state"],
-                batch["primary_action"],
+                batch["action"],
                 batch["next_state"],
                 batch["done"],
                 batch["labels_expert_is_one"].long(), 
             )
-            loss += 0.5*primary_loss 
-            loss += 0.5*const_loss 
-            loss += 0.1*(reg_loss  + reg_loss2)
+
+            reg_loss3 =self.reg(
+                lambda *x: self._reward_net(*x) - self._primary_net(*x),
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(), 
+            )
+            loss += 1.0*primary_loss 
+            loss += 1.0*const_loss 
+            loss += 0.1*(reg_loss  + reg_loss2 + reg_loss3)
             #loss += const_loss2*0.1
             # do gradient step
 
@@ -779,8 +804,8 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
             const_acts_th = th.as_tensor(const_acts, device=self.gen_algo.device)
 
             log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th)
-            primary_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, primary_acts_th, self.primary_policy)
-            const_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, const_acts_th, self.const_policy)
+            primary_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.primary_policy)
+            const_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.const_policy)
             if log_policy_act_prob is not None:
                 assert len(log_policy_act_prob) == n_samples
                 log_policy_act_prob = log_policy_act_prob.reshape((n_samples,))
