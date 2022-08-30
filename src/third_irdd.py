@@ -180,7 +180,7 @@ if __name__ == '__main__':
     else:
         name = 'irdd_' + sys.argv[1]
     
-    wandb.init(project='great', sync_tensorboard=True, dir=log_dir, name=name)
+    wandb.init(project='prelim', sync_tensorboard=True, dir=log_dir, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -197,9 +197,9 @@ if __name__ == '__main__':
         ent_coef=0.01,
         learning_rate=0.0003,
         #n_epochs=80,
-        n_epochs=20,
+        n_epochs=10,
         # n_steps=int(2048/32),
-        policy_kwargs={'optimizer_class':th.optim.AdamW},
+        policy_kwargs={'optimizer_class':th.optim.Adam},
         tensorboard_log='./logs/',
         device='cpu',
     )
@@ -208,7 +208,8 @@ if __name__ == '__main__':
         #return torch.norm(s[...,2:3], dim=-1, keepdim=False)  
         # print(torch.norm(s[...,2:3], dim=-1, keepdim=False).shape  )
         # print(s[...,2].shape)
-        return s[...,2:4]
+        # return torch.cat([s[...,2:3],ns[...,2:3]],dim=1)
+        return s[...,2:3]
     #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
     reward_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,
@@ -226,7 +227,7 @@ if __name__ == '__main__':
 
     )
     primary_net = PredefinedRewardNet(
-        venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=2,normalize_input_layer=None, #RunningNorm, #RunningNorm,
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=1 , use_action=True, normalize_input_layer=None, #RunningNorm, #RunningNorm,
         hid_sizes=[8, 8],
         # potential_hid_sizes=[8, 8],
     )
@@ -236,9 +237,9 @@ if __name__ == '__main__':
     # )
     gail_trainer = IRDD3(
         demonstrations=rollouts,
-        demo_batch_size=1024,
-        gen_replay_buffer_capacity=2048,
-        n_disc_updates_per_round=10,
+        demo_batch_size=2000,
+        gen_replay_buffer_capacity=4000,
+        n_disc_updates_per_round=20,
         venv=venv,
         gen_algo=learner,
         reward_net=reward_net,
@@ -246,7 +247,7 @@ if __name__ == '__main__':
         log_dir=log_dir,
         primary_net=primary_net,
         constraint_net=constraint_net,
-        disc_opt_cls=th.optim.AdamW,
+        disc_opt_cls=th.optim.Adam,
         # const_disc_opt_kwargs={"lr":0.001}
         custom_logger=custom_logger
     )
@@ -267,8 +268,8 @@ if __name__ == '__main__':
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
                 eval_env.render(mode='human')
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), "CartPole-Const-v0",log_dir, round_num, "constraint", True, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, "CartPole-Const-v0",log_dir,  round_num, "primary", True, )
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), "CartPole-Const-v0",log_dir,  int(gail_trainer._disc_step), "constraint", True, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, "CartPole-Const-v0",log_dir,  int(gail_trainer._disc_step), "primary", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )
     gail_trainer.train(int(10e6), callback=cb)  # Note: set to 300000 for better results
     learner_rewards_after_training, _ = evaluate_policy(

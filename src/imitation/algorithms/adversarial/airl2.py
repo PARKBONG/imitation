@@ -1,5 +1,5 @@
 """Adversarial Inverse Reinforcement Learning (AIRL)."""
-"""Core code for adversarial imitation learning, shared between GAIL and AIRL."""
+
 import abc
 import collections
 import dataclasses
@@ -29,11 +29,15 @@ from imitation.algorithms.adversarial import common
 from imitation.rewards import reward_nets
 
 from stable_baselines3.common.utils import obs_as_tensor, safe_mean
+
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 
 
-class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
-    """Base class for adversarial imitation learning algorithms like GAIL and AIRL."""
+class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
+    """Adversarial Inverse Reinforcement Learning (`AIRL`_).
+
+    .. _AIRL: https://arxiv.org/abs/1710.11248
+    """
 
     venv: vec_env.VecEnv
     """The original vectorized environment."""
@@ -66,7 +70,6 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         init_tensorboard_graph: bool = False,
         debug_use_ground_truth: bool = False,
         allow_variable_horizon: bool = False,
-        
     ):
         """Builds AdversarialTrainer.
         Args:
@@ -266,121 +269,20 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         # return primary_output_train + const_output_train.detach() - log_policy_act_prob
         return primary_output_train - log_policy_act_prob
 
-    def const_logits_expert_is_high(
+    def primary_logits_expert_is_high(
         self,
         state: th.Tensor,
         action: th.Tensor,
         next_state: th.Tensor,
         done: th.Tensor,
-        const_log_policy_act_prob: th.Tensor,
+        primary_log_policy_act_prob: th.Tensor,
     ) -> th.Tensor:
-        if const_log_policy_act_prob is None:
+        if primary_log_policy_act_prob is None:
             raise TypeError(
                 "Non-None `log_policy_act_prob` is required for this method.",
             )
-        const_output_train = self._constraint_net(state, action, next_state, done)
-        return const_output_train - const_log_policy_act_prob
-
-    def rew_gen(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-        is_expert: th.Tensor, 
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert]# + self._constraint_net(state, action, next_state, done)[~is_expert]
-        return const_output_train.mean()
-
-    def rew_expert(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor,
-
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[is_expert] #+ self._constraint_net(state, action, next_state, done)[is_expert]
-        reward = - const_output_train + 0.5 * const_output_train ** 2 
-        return reward.mean()
-
-    def primary_gen(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-        is_expert: th.Tensor, 
-        log_policy_act_prob: th.Tensor,
-        primary_log_policy_act_prob: th.Tensor,
-        clip_range: float = 0.2,
-        #clip_range: Union[float, Schedule] = 0.2,
-    ):
-
-        const_output_train = self._primary_net(state, action, next_state, done)[~is_expert]
-        ratio = th.exp(primary_log_policy_act_prob - log_policy_act_prob)
-        const_output_train = const_output_train * ratio
-        return const_output_train.mean()
-
-    def primary_expert(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor,
-    ):
-        const_output_train = self._primary_net(state, action, next_state, done)[is_expert]
-        reward = - const_output_train + 0.5 * const_output_train ** 2 
-        return reward.mean()
-
-
-    def const_gen(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-        is_expert: th.Tensor, 
-        log_policy_act_prob: th.Tensor,
-        constraint_log_policy_act_prob: th.Tensor,
-        clip_range: float = 0.2,
-        #clip_range: Union[float, Schedule] = 0.2,
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert].detach() -self._primary_net(state, action, next_state, done)[~is_expert]
-        ratio = th.exp(constraint_log_policy_act_prob - log_policy_act_prob)
-        const_output_train = const_output_train * ratio
-        return const_output_train.mean()
-
-    def const_expert(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor,
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[is_expert].detach()-self._primary_net(state, action, next_state, done)[is_expert]
-        reward = - const_output_train + 0.5 * const_output_train ** 2 
-        return reward.mean()
-
-    def reg(
-        self,
-        net,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor, 
-    ):
-        rew_output = net(state, action, next_state, done) 
-        reg1 = (rew_output**2).mean()
-        return reg1 #+ reg2
+        const_output_train = self._primary_net(state, action, next_state, done)
+        return const_output_train - primary_log_policy_act_prob
 
     @property
     def reward_train(self) -> reward_nets.RewardNet:
@@ -407,20 +309,6 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         while isinstance(reward_net, reward_nets.RewardNetWrapper):
             reward_net = reward_net.base
         return reward_net
-
-
-    # @property
-    # def constraint_train(self) -> reward_nets.RewardNet:
-    #     return self._constraint_net
-
-    # @property
-    # def constraint_test (self) -> reward_nets.RewardNet:
-    #     """Returns the unshaped version of reward network used for testing."""
-    #     reward_net = self._constraint_net
-    #     # Recursively return the base network of the wrapped reward net
-    #     while isinstance(reward_net, reward_nets.RewardNetWrapper):
-    #         reward_net = reward_net.base
-    #     return reward_net
 
     def set_demonstrations(self, demonstrations: base.AnyTransitions) -> None:
         self._demo_data_loader = base.make_data_loader(
@@ -473,100 +361,24 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["done"],
                 batch["log_policy_act_prob"],
             )
-            # loss = F.binary_cross_entropy_with_logits(
-            #     disc_logits,
-            #     batch["labels_expert_is_one"].float(),
-            # )
-            # loss = 
-            rew_loss_expert = self.rew_expert(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
+            loss = F.binary_cross_entropy_with_logits(
+                disc_logits,
+                batch["labels_expert_is_one"].float(),
             )
-            rew_loss_gen = self.rew_gen(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-            )
-            loss = (rew_loss_expert + rew_loss_gen)
 
-            primary_loss_expert = self.primary_expert(
+            primary_disc_logits = self.primary_logits_expert_is_high(
                 batch["state"],
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["labels_expert_is_one"].long(),
-            )
-            primary_loss_gen = self.primary_gen(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
                 batch["log_policy_act_prob"],
-                batch["primary_log_policy_act_prob"],
             )
-            primary_loss = primary_loss_expert + primary_loss_gen
-
-            const_loss_expert = self.const_expert(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-            )
-            const_loss_gen = self.const_gen(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-                batch["log_policy_act_prob"],
-                batch["const_log_policy_act_prob"],
-            )
-            const_loss = const_loss_expert + const_loss_gen
-
-
-            reg_loss =self.reg(
-                self._reward_net,
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(), 
-            )
-
-            reg_loss2 =self.reg(
-                self._primary_net,
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(), 
-            )
-
-            reg_loss3 =self.reg(
-                lambda *x: self._reward_net(*x) - self._primary_net(*x),
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(), 
-            )
+            primary_loss =F.binary_cross_entropy_with_logits(
+                primary_disc_logits,
+                batch["labels_expert_is_one"].float(),
+            ) 
+            
             loss += 1.0*primary_loss 
-            loss += 0.5*const_loss 
-            loss += 0.5*(reg_loss  + reg_loss2 + reg_loss3)
-            #loss += const_loss2*0.1
-            # do gradient step
-
-            """
-            self._disc_opt.zero_grad()
-            self._disc_opt.step()
-            """
             for op in self._disc_opt:
                 op.zero_grad()
             loss.backward()
@@ -588,6 +400,7 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
             self.logger.dump(self._disc_step)
             if write_summaries:
                 self._summary_writer.add_histogram("disc_logits", disc_logits.detach())
+                self._summary_writer.add_histogram("disc_logits(primary)", primary_disc_logits.detach())
 
         self._reward_net.eval()
         self._primary_net.eval()
@@ -713,12 +526,15 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         expert_samples: Optional[Mapping] = None,
     ) -> Mapping[str, th.Tensor]:
         """Build and return training batch for the next discriminator update.
+
         Args:
             gen_samples: Same as in `train_disc`.
             expert_samples: Same as in `train_disc`.
+
         Returns:
             The training batch: state, action, next state, dones, labels
             and policy log-probabilities.
+
         Raises:
             RuntimeError: Empty generator replay buffer.
             ValueError: `gen_samples` or `expert_samples` batch size is
@@ -774,24 +590,6 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         dones = np.concatenate([expert_samples["dones"], gen_samples["dones"]])
         # notice that the labels use the convention that expert samples are
         # labelled with 1 and generator samples with 0.
-
-        with th.no_grad():
-            # Convert to pytorch tensor or to TensorDict
-            obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
-            actions, values, log_probs = self.const_policy(obs_tensor)
-            actions = actions.detach().cpu().numpy()
-            assert actions.shape == gen_samples["acts"].shape
-        const_acts = np.concatenate([expert_samples["acts"], actions])
-
-
-        with th.no_grad():
-            # Convert to pytorch tensor or to TensorDict
-            obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
-            primary_actions, values, log_probs = self.primary_policy(obs_tensor)
-            primary_actions = primary_actions.detach().cpu().numpy()
-            assert primary_actions.shape == gen_samples["acts"].shape
-        primary_acts = np.concatenate([expert_samples["acts"], primary_actions])
-
         labels_expert_is_one = np.concatenate(
             [np.ones(n_expert, dtype=int), np.zeros(n_gen, dtype=int)],
         )
@@ -800,23 +598,11 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         with th.no_grad():
             obs_th = th.as_tensor(obs, device=self.gen_algo.device)
             acts_th = th.as_tensor(acts, device=self.gen_algo.device)
-
-            primary_acts_th = th.as_tensor(primary_acts, device=self.gen_algo.device)
-            const_acts_th = th.as_tensor(const_acts, device=self.gen_algo.device)
-
             log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th)
-            primary_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.primary_policy)
-            const_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.const_policy)
             if log_policy_act_prob is not None:
                 assert len(log_policy_act_prob) == n_samples
                 log_policy_act_prob = log_policy_act_prob.reshape((n_samples,))
-            if primary_log_policy_act_prob is not None:
-                assert len(primary_log_policy_act_prob) == n_samples
-                primary_log_policy_act_prob = primary_log_policy_act_prob.reshape((n_samples,))
-            if const_log_policy_act_prob is not None:
-                assert len(const_log_policy_act_prob) == n_samples
-                const_log_policy_act_prob = const_log_policy_act_prob.reshape((n_samples,))
-            del obs_th, acts_th, primary_acts_th, const_acts_th  # unneeded
+            del obs_th, acts_th  # unneeded
 
         obs_th, acts_th, next_obs_th, dones_th = self.reward_train.preprocess(
             obs,
@@ -824,31 +610,13 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
             next_obs,
             dones,
         )
-
-        _, primary_acts_th, _, _ = self.primary_train.preprocess(
-            obs,
-            primary_acts,
-            next_obs,
-            dones,
-        )
-        _, const_acts_th, _, _ = self.reward_train.preprocess(
-            obs,
-            const_acts,
-            next_obs,
-            dones,
-        )
-
         batch_dict = {
             "state": obs_th,
             "action": acts_th,
-            "primary_action": primary_acts_th,
-            "const_action": const_acts_th,
             "next_state": next_obs_th,
             "done": dones_th,
             "labels_expert_is_one": self._torchify_array(labels_expert_is_one),
             "log_policy_act_prob": log_policy_act_prob,
-            "primary_log_policy_act_prob": primary_log_policy_act_prob,
-            "const_log_policy_act_prob": const_log_policy_act_prob,
         }
 
         return batch_dict

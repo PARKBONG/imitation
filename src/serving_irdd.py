@@ -4,6 +4,7 @@ from imitation.algorithms.adversarial.airl import AIRL
 
 from imitation.algorithms.adversarial.irdd import IRDD 
 from imitation.algorithms.adversarial.irdd2 import IRDD2
+from imitation.algorithms.adversarial.irdd3 import IRDD3
 from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
 from imitation.util.networks import RunningNorm
 # from stable_baselines3 import PPO
@@ -30,12 +31,13 @@ from imitation.util import util
 import torch.nn as nn
 import torch as th
 import numpy as np
+import time
 import math
 from imitation.rewards.reward_nets import RewardNetWrapper
 
 from imitation.policies import serialize
 from scipy import ndimage
-with open('../jjh_data/expert_models/cartpole_const/final3.pkl', 'rb') as f:
+with open('../jjh_data/expert_models/serving/final.pkl', 'rb') as f:
     rollouts = types.load(f)
 
 def save(trainer, save_path):
@@ -80,7 +82,10 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
     boundary_high = 2.5
     barrier_range = [0.2, 0.6]
     barrier_y = 0.3
-
+    cart_height = 1.0 / (12 ** 0.5)
+    pole_height = 0.9
+    plate_height = 0.2
+        
     for itr in range(1):
         state = env.reset()
 
@@ -89,21 +94,38 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
         next_obs_batch = []
 
         num_y = 0
-        for pos_y in np.arange(boundary_low, boundary_high, grid_size):
+        for pos in np.arange(-1.2, 1.2, 0.1):
             num_y += 1
             num_x = 0
-            for pos_x in np.arange(boundary_low, boundary_high, grid_size):
+            for ang in np.arange(-0.3, 0.3, 0.025):
                 num_x += 1
-                obs = np.array([pos_y, 0, math.cos(pos_x), math.sin(pos_x), 0.0,])
+                obs = np.zeros(11)
+                
+                cart_x = pos
+                plate_ang = ang
+                #plate_x = cart_x  np.sin(plate_ang) * (cart_height + plate_height/2)# - cart_height*2.0 - plate_height - pole_height/2)
+                plate_x = cart_x + np.sin(plate_ang) * (1.0 * cart_height + plate_height/2)
+                pole_x = cart_x + np.sin(plate_ang) * (pole_height/2 - cart_height + plate_height/2)
+                
+                # <state type="xvel" body="cart"/>
+                obs[1] = cart_x# <state type="xpos" body="cart"/>
+                obs[2] = plate_x# <state type="xpos" body="plate"/>
+                # <state type="xvel" body="plate"/>
+                obs[4] = plate_ang # <state type="apos" body="plate"/>
+                # <state type="avel" body="plate"/>
+                obs[6] = 1.0 # <state type="xpos" body="goal"/>
+                obs[7] = pole_x# <state type="xpos" body="pole"/>
+                # <state type="xvel" body="pole"/>
+                obs[9] = plate_ang*2 # <state type="apos" body="pole"/>
+                # <state type="avel" body="pole"/>
                 obs_batch.append(obs)
 
-                state = np.array([pos_y, 0, pos_x, 0.0,])
-                env.set_state(state)
                 action, _ = model.predict(obs, deterministic=True)
-                next_state, reward, done, _ = env.step(action)
+                # next_state, reward, done, _ = env.step(action)
 
                 obs_action.append(action)
-                next_obs_batch.append(next_state)
+                # next_obs_batch.append(next_state)
+                next_obs_batch.append(obs)
 
         obs_batch = np.array(obs_batch)
         next_obs_batch = np.array(next_obs_batch)
@@ -179,7 +201,7 @@ if __name__ == '__main__':
     else:
         name = 'irdd_' + sys.argv[1]
     
-    wandb.init(project='great', sync_tensorboard=True, dir=log_dir, name=name)
+    wandb.init(project='prelim', sync_tensorboard=True, dir=log_dir, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -187,7 +209,7 @@ if __name__ == '__main__':
         format_strs=log_format_strs,
     )
     #venv = DummyVecEnv([lambda: gym.make("Gripper-v0")] * 4)
-    venv = SubprocVecEnv( [make_env("CartPole-Const-v0", i) for i in range(8)])
+    venv = SubprocVecEnv( [make_env("Serving-v0", i) for i in range(16)])
     learner = PPO2(
         env=venv,
         policy=MlpPolicy,
@@ -196,9 +218,10 @@ if __name__ == '__main__':
         ent_coef=0.01,
         learning_rate=0.0003,
         #n_epochs=80,
-        n_epochs=20,
+        n_epochs=30,
+        target_kl=0.02,
         # n_steps=int(2048/32),
-        policy_kwargs={'optimizer_class':th.optim.AdamW},
+        policy_kwargs={'optimizer_class':th.optim.Adam},
         tensorboard_log='./logs/',
         device='cpu',
     )
@@ -207,8 +230,12 @@ if __name__ == '__main__':
         #return torch.norm(s[...,2:3], dim=-1, keepdim=False)  
         # print(torch.norm(s[...,2:3], dim=-1, keepdim=False).shape  )
         # print(s[...,2].shape)
-        return s[...,2:3]
-    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
+        # return torch.cat([s[...,2:3],ns[...,2:3]],dim=1)
+        # print(torch.cat([s[...,0:1], s[...,6:7]], dim=-1).shape)
+        # print(s[...,0:1].shape)
+        # exit()
+        #return torch.cat([s[...,1:2], s[...,6:7]], dim=-1)
+        return s[...,6:9]    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
     reward_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,
         # potential_hid_sizes=[8, 8],
@@ -216,28 +243,28 @@ if __name__ == '__main__':
     )
     reward_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,#RunningNorm,
-        hid_sizes=[8, 8],
+        # hid_sizes=[8, 8],
 
     )
     constraint_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,#RunningNorm,
-        hid_sizes=[8, 8],
+        # hid_sizes=[8, 8],
 
     )
     primary_net = PredefinedRewardNet(
-        venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=2,normalize_input_layer=None, #RunningNorm, #RunningNorm,
-        hid_sizes=[8, 8],
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=3, use_action=True, normalize_input_layer=None, #RunningNorm, #RunningNorm,
+        # hid_sizes=[8, 8],
         # potential_hid_sizes=[8, 8],
     )
     # reward_net = ShapedScaledRewardNet(
     #     venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
     #     potential_hid_sizes=[8, 8],
     # )
-    gail_trainer = IRDD2(
+    gail_trainer = IRDD3(
         demonstrations=rollouts,
-        demo_batch_size=1024,
-        gen_replay_buffer_capacity=2048,
-        n_disc_updates_per_round=10,
+        demo_batch_size=2000,
+        gen_replay_buffer_capacity=4000,
+        n_disc_updates_per_round=20,
         venv=venv,
         gen_algo=learner,
         reward_net=reward_net,
@@ -245,7 +272,7 @@ if __name__ == '__main__':
         log_dir=log_dir,
         primary_net=primary_net,
         constraint_net=constraint_net,
-        disc_opt_cls=th.optim.AdamW,
+        disc_opt_cls=th.optim.Adam,
         # const_disc_opt_kwargs={"lr":0.001}
         custom_logger=custom_logger
     )
@@ -255,7 +282,7 @@ if __name__ == '__main__':
     # )
     # print(learner_rewards_before_training)
 
-    eval_env = DummyVecEnv([lambda: gym.make("CartPole-Const-v0")] * 1)
+    eval_env = DummyVecEnv([lambda: gym.make("Serving-v0")] * 1)
     eval_env.render(mode='human')
     checkpoint_interval=3
     def cb(round_num):
@@ -266,8 +293,9 @@ if __name__ == '__main__':
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
                 eval_env.render(mode='human')
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir, round_num, "constraint", True, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, "CartPole-Const-v0",log_dir,  round_num, "primary", True, )
+                time.sleep(0.05)
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), "CartPole-Const-v0",log_dir,  int(gail_trainer._disc_step), "constraint", True, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, "CartPole-Const-v0",log_dir,  int(gail_trainer._disc_step), "primary", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )
     gail_trainer.train(int(10e6), callback=cb)  # Note: set to 300000 for better results
     learner_rewards_after_training, _ = evaluate_policy(

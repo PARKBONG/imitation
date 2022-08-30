@@ -24,8 +24,8 @@ policy_path=[model_dir] \
 rollout_save_path=[rollout_dir] \
 render
 
-python3 -m imitation.scripts.eval_policy with gripper_v1 \
-policy_type=sac \
+python3 -m imitation.scripts.eval_policy with serving \
+policy_type=ppo \
 policy_path=jjh_data/expert_models/gripper_v1/ \
 rollout_save_path=jjh_data/expert_models/gripper_v1/final.pkl \
 render

@@ -360,7 +360,7 @@ class ScaledRewardNet(RewardNet):
         self.reward_fn = reward_fn
 
     def forward(self, state, action, next_state, done):
-        reward_form = self.reward_fn(state, action, next_state, done)
+        reward_form = self.reward_fn(state, action, next_state, done).squeeze(-1)
         outputs = reward_form * self.scale + self.bias
         assert outputs.shape == state.shape[:1]
 

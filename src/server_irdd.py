@@ -4,6 +4,7 @@ from imitation.algorithms.adversarial.airl import AIRL
 
 from imitation.algorithms.adversarial.irdd import IRDD 
 from imitation.algorithms.adversarial.irdd2 import IRDD2
+from imitation.algorithms.adversarial.irdd3 import IRDD3
 from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
 from imitation.util.networks import RunningNorm
 # from stable_baselines3 import PPO
@@ -30,13 +31,19 @@ from imitation.util import util
 import torch.nn as nn
 import torch as th
 import numpy as np
+import time
 import math
 from imitation.rewards.reward_nets import RewardNetWrapper
 
+import hydra
+from hydra.utils import get_original_cwd, to_absolute_path
+from omegaconf import DictConfig, OmegaConf
 from imitation.policies import serialize
 from scipy import ndimage
-with open('../jjh_data/expert_models/cartpole_const/final3.pkl', 'rb') as f:
-    rollouts = types.load(f)
+def load_rollouts(dir):
+    with open(dir, 'rb') as f:
+        rollouts = types.load(f)
+    return rollouts
 
 def save(trainer, save_path):
     """Save discriminator and generator."""
@@ -80,7 +87,19 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
     boundary_high = 2.5
     barrier_range = [0.2, 0.6]
     barrier_y = 0.3
+    cart_height = 1.0 / (12 ** 0.5)
+    pole_height = 0.9
 
+    plate_width = 0.6
+    plate_height = 0.2
+    pole_width = 0.2
+    plate_height = 0.2
+    plate_x = obs[1]
+    plate_ang = obs[3]
+    pole_x = obs[5]
+    pole_ang = obs[7]
+    plate_y = obs[-2]
+        
     for itr in range(1):
         state = env.reset()
 
@@ -88,22 +107,43 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
         obs_action = []
         next_obs_batch = []
 
+        plate_ang = 0.0
         num_y = 0
-        for pos_y in np.arange(boundary_low, boundary_high, grid_size):
+        for pos in np.arange(-1.2, 1.2, 0.1):
             num_y += 1
             num_x = 0
-            for pos_x in np.arange(boundary_low, boundary_high, grid_size):
+            for ang in np.arange(-0.3, 0.3, 0.025):
                 num_x += 1
-                obs = np.array([pos_y, 0, math.cos(pos_x), math.sin(pos_x), 0.0,])
+                obs = np.zeros(9)
+                """
+                <state type="xpos" body="goal"/>    ## 0
+                <state type="xpos" body="plate"/>   ## 1
+                <state type="xvel" body="plate"/>   ## 2
+                <state type="apos" body="plate"/>   ## 3   
+                <state type="avel" body="plate"/>   ## 4
+                <state type="xpos" body="pole"/>    ## 5
+                <state type="xvel" body="pole"/>    ## 6
+                <state type="apos" body="pole"/>    ## 7
+                <state type="avel" body="pole"/>    ## 8
+                """
+                plate_x = pos
+                
+                pole_ang = ang
+                mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
+                pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
+                
+                obs[0] = 1.0
+                obs[1] = pos
+                obs[5] = pole_x 
+                obs[7] = ang
                 obs_batch.append(obs)
 
-                state = np.array([pos_y, 0, pos_x, 0.0,])
-                env.set_state(state)
                 action, _ = model.predict(obs, deterministic=True)
-                next_state, reward, done, _ = env.step(action)
+                # next_state, reward, done, _ = env.step(action)
 
                 obs_action.append(action)
-                next_obs_batch.append(next_state)
+                # next_obs_batch.append(next_state)
+                next_obs_batch.append(obs)
 
         obs_batch = np.array(obs_batch)
         next_obs_batch = np.array(next_obs_batch)
@@ -154,10 +194,35 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
         print('Save Itr', itr)
         plt.close()
 
-
-if __name__ == '__main__':
+@hydra.main(config_path="config", config_name="common")
+def main(cfg: DictConfig):
+    n_envs = int(cfg.n_envs)
+    total_steps = int(cfg.total_steps)
+    is_wandb = bool(cfg.is_wandb)
+    device = cfg.device
     
-    log_format_strs = ["wandb", "stdout"]
+    env_id = cfg.env.env_id
+    r_gamma = float(cfg.env.r_gamma)
+    
+    gen_lr = float(cfg.gen.lr)
+    ent_coef = float(cfg.gen.ent_coef)
+    target_kl = int(cfg.gen.target_kl)
+    batch_size = int(cfg.gen.batch_size)
+    n_epochs = int(cfg.gen.n_epochs)
+    
+    disc_lr = float(cfg.disc.lr)
+    demo_batch_size = int(cfg.disc.demo_batch_size)
+    gen_replay_buffer_capacity = int(cfg.disc.gen_replay_buffer_capacity)
+    n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
+    hid_size = int(cfg.disc.hid_size)
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving","final.pkl"))
+    
+    tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
+
+    log_format_strs = ["stdout"]
+    if is_wandb:
+        log_format_strs.append("wandb")
+        
     def make_env(env_id, rank, seed=0):
         def _init():
             env = gym.make(env_id)
@@ -165,7 +230,6 @@ if __name__ == '__main__':
             env = Monitor(env)
             return env
         return _init
-    print(sys.argv)
 
     log_dir = os.path.join(
                 "output",
@@ -173,13 +237,13 @@ if __name__ == '__main__':
                 util.make_unique_timestamp(),
             )
     os.makedirs(log_dir, exist_ok=True)
-    print(sys.argv)
-    if len(sys.argv) <2:
-        name = None
-    else:
-        name = 'irdd_' + sys.argv[1]
     
-    wandb.init(project='great', sync_tensorboard=True, dir=log_dir, name=name)
+    if cfg.comment == "None":
+        comment = ""
+    else:
+        comment = f"_{str(cfg.comment)}"
+    name = 'irdd' + comment
+    wandb.init(project='server', sync_tensorboard=True, dir=log_dir, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -187,28 +251,33 @@ if __name__ == '__main__':
         format_strs=log_format_strs,
     )
     #venv = DummyVecEnv([lambda: gym.make("Gripper-v0")] * 4)
-    venv = SubprocVecEnv( [make_env("CartPole-Const-v0", i) for i in range(8)])
+    venv = SubprocVecEnv( [make_env(env_id, i) for i in range(n_envs)])
     learner = PPO2(
         env=venv,
         policy=MlpPolicy,
-        batch_size=64,
+        batch_size=batch_size,
         # n_steps=512,
-        ent_coef=0.01,
-        learning_rate=0.0003,
+        ent_coef=ent_coef,
+        learning_rate=gen_lr,
         #n_epochs=80,
-        n_epochs=20,
+        n_epochs=n_epochs,
+        target_kl=target_kl,
         # n_steps=int(2048/32),
-        policy_kwargs={'optimizer_class':th.optim.AdamW},
+        policy_kwargs={'optimizer_class':th.optim.Adam},
         tensorboard_log='./logs/',
-        device='cpu',
+        device=device,
     )
     print(learner.n_epochs)
     def reward_fn(s, a, ns, d):
         #return torch.norm(s[...,2:3], dim=-1, keepdim=False)  
         # print(torch.norm(s[...,2:3], dim=-1, keepdim=False).shape  )
         # print(s[...,2].shape)
-        return s[...,2:3]
-    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
+        # return torch.cat([s[...,2:3],ns[...,2:3]],dim=1)
+        # print(torch.cat([s[...,0:1], s[...,6:7]], dim=-1).shape)
+        # print(s[...,0:1].shape)
+        # exit()
+        #return torch.cat([s[...,1:2], s[...,6:7]], dim=-1)
+        return s[...,6:8]    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
     reward_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,
         # potential_hid_sizes=[8, 8],
@@ -216,37 +285,38 @@ if __name__ == '__main__':
     )
     reward_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,#RunningNorm,
-        hid_sizes=[8, 8],
+        hid_sizes=[hid_size, hid_size],
 
     )
     constraint_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=None,#RunningNorm,
-        hid_sizes=[8, 8],
+        hid_sizes=[hid_size, hid_size],
 
     )
     primary_net = PredefinedRewardNet(
-        venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=2,normalize_input_layer=None, #RunningNorm, #RunningNorm,
-        hid_sizes=[8, 8],
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=2, use_action=True, normalize_input_layer=None, #RunningNorm, #RunningNorm,
+        hid_sizes=[hid_size, hid_size],
         # potential_hid_sizes=[8, 8],
     )
     # reward_net = ShapedScaledRewardNet(
     #     venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
     #     potential_hid_sizes=[8, 8],
     # )
-    gail_trainer = IRDD2(
+    gail_trainer = IRDD3(
         demonstrations=rollouts,
-        demo_batch_size=1024,
-        gen_replay_buffer_capacity=2048,
-        n_disc_updates_per_round=10,
+        demo_batch_size=demo_batch_size,
+        gen_replay_buffer_capacity=gen_replay_buffer_capacity,
+        n_disc_updates_per_round=n_disc_updates_per_round,
         venv=venv,
         gen_algo=learner,
         reward_net=reward_net,
-        # disc_opt_kwargs={"lr":0.001},
+        disc_opt_kwargs={"lr":disc_lr},
         log_dir=log_dir,
         primary_net=primary_net,
         constraint_net=constraint_net,
-        disc_opt_cls=th.optim.AdamW,
-        # const_disc_opt_kwargs={"lr":0.001}
+        disc_opt_cls=th.optim.Adam,
+        const_disc_opt_kwargs={"lr":disc_lr},
+        primary_disc_opt_kwargs={"lr":disc_lr},
         custom_logger=custom_logger
     )
 
@@ -255,7 +325,7 @@ if __name__ == '__main__':
     # )
     # print(learner_rewards_before_training)
 
-    eval_env = DummyVecEnv([lambda: gym.make("CartPole-Const-v0")] * 1)
+    eval_env = DummyVecEnv([lambda: gym.make(env_id)] * 1)
     eval_env.render(mode='human')
     checkpoint_interval=3
     def cb(round_num):
@@ -266,11 +336,16 @@ if __name__ == '__main__':
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
                 eval_env.render(mode='human')
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir, round_num, "constraint", True, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, "CartPole-Const-v0",log_dir,  round_num, "primary", True, )
+                time.sleep(0.05)
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(gail_trainer._disc_step), "constraint", True, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(gail_trainer._disc_step), "primary", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )
     gail_trainer.train(int(10e6), callback=cb)  # Note: set to 300000 for better results
     learner_rewards_after_training, _ = evaluate_policy(
         learner, venv, 100, return_episode_rewards=True
     )
     print(learner_rewards_after_training )
+
+if __name__ == '__main__':
+    #main(env_id=env_id)
+    main()

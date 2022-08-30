@@ -134,6 +134,13 @@ def peginhole_v1():
 
 
 @eval_policy_ex.named_config
+def serving():
+    common = dict(env_name="Serving-v0",
+    max_episode_steps = 100,
+    num_vec = 16  # number of environments in VecEnv)
+    )
+
+@eval_policy_ex.named_config
 def cartpole_const():
     common = dict(env_name="CartPole-Const-v0",
     

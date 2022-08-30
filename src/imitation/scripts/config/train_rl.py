@@ -241,6 +241,24 @@ def seals_mountain_car():
 
 
 @train_rl_ex.named_config
+def serving():
+    common = dict(env_name="Serving-v0",
+    max_episode_steps = 100,
+    num_vec = 32  # number of environments in VecEnv)
+    )
+    rl = dict(
+        # batch_size=4096,
+        rl_kwargs=dict(
+            gamma=0.99,
+            ent_coef=0.01,
+            learning_rate=3e-4,
+            target_kl=0.2,
+        ),
+    )
+    total_timesteps = int(2.0e6)
+
+
+@train_rl_ex.named_config
 def pendulum():
     common = dict(env_name="Pendulum-v1")
     rl = dict(
