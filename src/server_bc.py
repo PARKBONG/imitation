@@ -348,12 +348,22 @@ def main(cfg: DictConfig):
     learner_rewards_before_training, _ = evaluate_policy(
         bc_trainer.policy, eval_env, 100, return_episode_rewards=True
     ) 
-    bc_trainer.train(n_epochs=20)
+    bc_trainer.train(n_epochs=5)
     obs = eval_env.reset()
     for i in range(200):
         action, _states = bc_trainer.policy.predict(obs, deterministic=False)
         obs, _, _, _= eval_env.step(action)
         eval_env.render(mode='human')
+        print("OBS: ", end=" ")
+        for o in obs[0]:
+            print("{:5.4f}".format(o), end="|")
+        print("\n")
+        print("ACT: ", end=" ")
+            
+        for a in action[0]:
+            print("{:5.4f}".format(a), end="|")
+        print("\n")
+        
         time.sleep(0.05)
             # visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(gail_trainer._disc_step), "constraint", True, )
     learner_rewards_after_training, _ = evaluate_policy(

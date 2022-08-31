@@ -291,6 +291,7 @@ def main(cfg: DictConfig):
     target_kl = int(cfg.gen.target_kl)
     batch_size = int(cfg.gen.batch_size)
     n_epochs = int(cfg.gen.n_epochs)
+    n_steps = int(cfg.gen.n_steps)
     
     disc_lr = float(cfg.disc.lr)
     demo_batch_size = int(cfg.disc.demo_batch_size)
@@ -344,8 +345,7 @@ def main(cfg: DictConfig):
         learning_rate=gen_lr,
         #n_epochs=80,
         n_epochs=n_epochs,
-        target_kl=target_kl,
-        # n_steps=int(2048/32),
+        n_steps=n_steps,
         policy_kwargs={'optimizer_class':th.optim.Adam},
         tensorboard_log='./logs/',
         device=device,
