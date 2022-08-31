@@ -105,17 +105,19 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
             num_x = 0
             for ang in np.arange(-1, 1, 0.05):
                 num_x += 1
-                obs = np.zeros(9)
+                obs = np.zeros(11)
                 """
                     <state type="xpos" body="goal"/>    ## 0
                 <state type="xpos" body="plate"/>   ## 1
-                <state type="xvel" body="plate"/>   ## 2
-                <state type="apos" body="plate"/>   ## 3   
-                <state type="avel" body="plate"/>   ## 4
-                <state type="xpos" body="pole"/>    ## 5
-                <state type="xvel" body="pole"/>    ## 6
-                <state type="apos" body="pole"/>    ## 7
-                <state type="avel" body="pole"/>    ## 8
+                <state type="ypos" body="plate"/>   ## 2
+                <state type="xvel" body="plate"/>   ## 3
+                <state type="apos" body="plate"/>   ## 4   
+                <state type="avel" body="plate"/>   ## 5
+                <state type="xpos" body="pole"/>    ## 6
+                <state type="ypos" body="pole"/>    ## 7
+                <state type="xvel" body="pole"/>    ## 8
+                <state type="apos" body="pole"/>    ## 9
+                <state type="avel" body="pole"/>    ## 10
                 """
                 plate_x = pos
                 
@@ -124,9 +126,11 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
                 obs[0] = 0.7
+                obs[2] = cart_height*3.0
                 obs[1] = pos
-                obs[5] = pos
-                obs[7] = ang
+                obs[7] = cart_height*3.0
+                obs[6] = pos
+                obs[9] = ang
                 obs_batch.append(obs)
 
                 action, _ = model.predict(obs, deterministic=True)
@@ -205,22 +209,24 @@ def visualize_reward_gt(env_id, log_dir, round_num=-1, tag='', use_wandb=False, 
         rewards = []
         plate_ang = 0.0
         num_y = 0
-        for pos in np.arange(-1.5, 1.5, 0.05):
+        for pos in np.arange(-1, 1, 0.05):
             num_y += 1
             num_x = 0
-            for ang in np.arange(-1.5, 1.5, 0.05):
+            for ang in np.arange(-1, 1, 0.05):
                 num_x += 1
-                obs = np.zeros(9)
+                obs = np.zeros(11)
                 """
                     <state type="xpos" body="goal"/>    ## 0
                 <state type="xpos" body="plate"/>   ## 1
-                <state type="xvel" body="plate"/>   ## 2
-                <state type="apos" body="plate"/>   ## 3   
-                <state type="avel" body="plate"/>   ## 4
-                <state type="xpos" body="pole"/>    ## 5
-                <state type="xvel" body="pole"/>    ## 6
-                <state type="apos" body="pole"/>    ## 7
-                <state type="avel" body="pole"/>    ## 8
+                <state type="ypos" body="plate"/>   ## 2
+                <state type="xvel" body="plate"/>   ## 3
+                <state type="apos" body="plate"/>   ## 4   
+                <state type="avel" body="plate"/>   ## 5
+                <state type="xpos" body="pole"/>    ## 6
+                <state type="ypos" body="pole"/>    ## 7
+                <state type="xvel" body="pole"/>    ## 8
+                <state type="apos" body="pole"/>    ## 9
+                <state type="avel" body="pole"/>    ## 10
                 """
                 plate_x = pos
                 
@@ -229,9 +235,11 @@ def visualize_reward_gt(env_id, log_dir, round_num=-1, tag='', use_wandb=False, 
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
                 obs[0] = 0.7
+                obs[2] = cart_height*3.0
                 obs[1] = pos
-                obs[5] = pos
-                obs[7] = ang
+                obs[7] = cart_height*3.0
+                obs[6] = pos
+                obs[9] = ang
                 
                 ucost = 1e-5*(ang**2)
                 # print(self.contact)
@@ -277,7 +285,6 @@ def visualize_reward_gt(env_id, log_dir, round_num=-1, tag='', use_wandb=False, 
         plt.close()
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
-    normalize_layer = {"None":None, "RunningNorm":RunningNorm}
     n_envs = int(cfg.n_envs)
     total_steps = int(cfg.total_steps)
     is_wandb = bool(cfg.is_wandb)
@@ -297,7 +304,6 @@ def main(cfg: DictConfig):
     gen_replay_buffer_capacity = int(cfg.disc.gen_replay_buffer_capacity)
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
-    normalize = cfg.disc.normalize
     rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_imit","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
@@ -335,7 +341,7 @@ def main(cfg: DictConfig):
     )
     #venv = DummyVecEnv([lambda: gym.make("Gripper-v0")] * 4)
     venv = SubprocVecEnv( [make_env(env_id, i) for i in range(n_envs)])
-    learner = PPO2(
+    learner = PPO(
         env=venv,
         policy=MlpPolicy,
         batch_size=batch_size,
@@ -360,24 +366,24 @@ def main(cfg: DictConfig):
         # print(s[...,0:1].shape)
         # exit()
         # return torch.cat([s[...,[0,1, 4]], s[...,6:7]], dim=-1)
-        return s[...,[0,1,3]]    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
+        return s[...,[0,1,4]]    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
     reward_net = BasicShapedRewardNet(
-        venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],
+        venv.observation_space, venv.action_space, normalize_input_layer=None,
         # potential_hid_sizes=[8, 8],
         # reward_hid_sizes=[8, 8],
     )
     reward_net = BasicRewardNet(
-        venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
+        venv.observation_space, venv.action_space, normalize_input_layer=RunningNorm,#RunningNorm,
         hid_sizes=[hid_size, hid_size],
 
     )
     constraint_net = BasicRewardNet(
-        venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
+        venv.observation_space, venv.action_space, normalize_input_layer=None,#RunningNorm,
         hid_sizes=[hid_size, hid_size],
 
     )
     primary_net = PredefinedRewardNet(
-            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=3, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=3, use_action=True, normalize_input_layer=None, #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],
         # potential_hid_sizes=[8, 8],
     )
@@ -385,7 +391,7 @@ def main(cfg: DictConfig):
     #     venv.observation_space, venv.action_space,reward_fn =reward_fn, normalize_input_layer=None,
     #     potential_hid_sizes=[8, 8],
     # )
-    gail_trainer = IRDD3(
+    gail_trainer = GAIL(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -394,12 +400,12 @@ def main(cfg: DictConfig):
         gen_algo=learner,
         reward_net=reward_net,
         disc_opt_kwargs={"lr":disc_lr},
-        log_dir=log_dir,
-        primary_net=primary_net,
-        constraint_net=constraint_net,
         disc_opt_cls=th.optim.Adam,
-        const_disc_opt_kwargs={"lr":disc_lr},
-        primary_disc_opt_kwargs={"lr":disc_lr},
+        log_dir=log_dir,
+        # primary_net=primary_net,
+        # constraint_net=constraint_net,
+        # const_disc_opt_kwargs={"lr":disc_lr},
+        # primary_disc_opt_kwargs={"lr":disc_lr},
         custom_logger=custom_logger
     )
 
@@ -417,14 +423,13 @@ def main(cfg: DictConfig):
         if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:
             save(gail_trainer, os.path.join(log_dir, "checkpoints", f"{round_num:05d}"))
             obs = eval_env.reset()
-            for i in range(300):
+            for i in range(200):
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
                 eval_env.render(mode='human')
-                time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(gail_trainer._disc_step), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(gail_trainer._disc_step), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(gail_trainer._disc_step), "total", is_wandb, )
+                time.sleep(0.05)
+            # visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(gail_trainer._disc_step), "constraint", True, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(gail_trainer._disc_step), "primary", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )
     gail_trainer.train(int(10e6), callback=cb)  # Note: set to 300000 for better results
     learner_rewards_after_training, _ = evaluate_policy(

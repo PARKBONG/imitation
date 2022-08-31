@@ -1,7 +1,16 @@
 # Project-specific
 .#*
 *.html
-output/
+*/output/
+*/outputs/
+*.pt
+*.zip
+*.pkl
+*.png
+*.csv
+*.json
+sacred
+events.out.*
 /data/
 auto.pkl
 nohup.out

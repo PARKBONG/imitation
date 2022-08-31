@@ -558,8 +558,8 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["labels_expert_is_one"].long(), 
             )
             loss += 1.0*primary_loss 
-            loss += 0.5*const_loss 
-            loss += 0.5*(reg_loss  + reg_loss2 + reg_loss3)
+            loss += 1.0*const_loss 
+            loss += 0.1*(reg_loss  + reg_loss2 + reg_loss3)
             #loss += const_loss2*0.1
             # do gradient step
 

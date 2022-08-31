@@ -26,8 +26,13 @@ render
 
 python3 -m imitation.scripts.eval_policy with serving \
 policy_type=ppo \
-policy_path=jjh_data/expert_models/gripper_v1/ \
-rollout_save_path=jjh_data/expert_models/gripper_v1/final.pkl \
+policy_path=jjh_data/expert_models/serving_imit/ \
+rollout_save_path=jjh_data/expert_models/serving_imit/final.pkl \
+render
+python3 -m imitation.scripts.eval_policy with serving \
+policy_type=ppo \
+policy_path=jjh_data/expert_models/serving/ \
+rollout_save_path=jjh_data/expert_models/serving/final.pkl \
 render
 ```
 
