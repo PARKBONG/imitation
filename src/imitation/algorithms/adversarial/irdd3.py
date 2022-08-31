@@ -322,7 +322,8 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
 
         const_output_train = self._primary_net(state, action, next_state, done)[~is_expert]
         ratio = th.exp(primary_log_policy_act_prob - log_policy_act_prob)
-        const_output_train = const_output_train * ratio
+
+        const_output_train = const_output_train * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
         return const_output_train.mean()
 
     def primary_expert(
@@ -353,7 +354,8 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
 
         const_output_train = self._reward_net(state, action, next_state, done)[~is_expert].detach() -self._primary_net(state, action, next_state, done)[~is_expert]
         ratio = th.exp(constraint_log_policy_act_prob - log_policy_act_prob)
-        const_output_train = const_output_train * ratio
+        const_output_train = const_output_train * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
+        
         return const_output_train.mean()
 
     def const_expert(
