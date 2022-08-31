@@ -125,7 +125,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
-                obs[0] = 0.7
+                obs[0] = 1.0
                 obs[2] = cart_height*3.0
                 obs[1] = pos
                 obs[7] = cart_height*3.0
@@ -234,7 +234,7 @@ def visualize_reward_gt(env_id, log_dir, round_num=-1, tag='', use_wandb=False, 
                 mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
-                obs[0] = 0.7
+                obs[0] = 1.0
                 obs[2] = cart_height*3.0
                 obs[1] = pos
                 obs[7] = cart_height*3.0

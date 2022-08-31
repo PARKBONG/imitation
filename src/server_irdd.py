@@ -100,10 +100,10 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
 
         plate_ang = 0.0
         num_y = 0
-        for pos in np.arange(-1, 1, 0.05):
+        for pos in np.arange(-1.2, 1.2, 0.05):
             num_y += 1
             num_x = 0
-            for ang in np.arange(-1, 1, 0.05):
+            for ang in np.arange(-1.2, 1.2, 0.05):
                 num_x += 1
                 obs = np.zeros(9)
                 """
@@ -123,7 +123,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
-                obs[0] = 0.7
+                obs[0] = 1.0
                 obs[1] = pos
                 obs[5] = pos
                 obs[7] = ang
@@ -228,7 +228,7 @@ def visualize_reward_gt(env_id, log_dir, round_num=-1, tag='', use_wandb=False, 
                 mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
-                obs[0] = 0.7
+                obs[0] = 1.0
                 obs[1] = pos
                 obs[5] = pos
                 obs[7] = ang
