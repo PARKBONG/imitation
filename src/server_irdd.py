@@ -282,13 +282,14 @@ def main(cfg: DictConfig):
     total_steps = int(cfg.total_steps)
     is_wandb = bool(cfg.is_wandb)
     device = cfg.device
+    render = bool(cfg.render)
     
     env_id = cfg.env.env_id
     r_gamma = float(cfg.env.r_gamma)
     
     gen_lr = float(cfg.gen.lr)
     ent_coef = float(cfg.gen.ent_coef)
-    target_kl = int(cfg.gen.target_kl)
+    target_kl = float(cfg.gen.target_kl)
     batch_size = int(cfg.gen.batch_size)
     n_epochs = int(cfg.gen.n_epochs)
     n_steps = int(cfg.gen.n_steps)
@@ -327,7 +328,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'irdd' + comment
-    wandb.init(project='server', sync_tensorboard=True, dir=log_dir, name=name)
+    wandb.init(project='server', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -344,6 +345,7 @@ def main(cfg: DictConfig):
         ent_coef=ent_coef,
         learning_rate=gen_lr,
         #n_epochs=80,
+        target_kl=target_kl,
         n_epochs=n_epochs,
         n_steps=n_steps,
         policy_kwargs={'optimizer_class':th.optim.Adam},
@@ -360,7 +362,7 @@ def main(cfg: DictConfig):
         # print(s[...,0:1].shape)
         # exit()
         # return torch.cat([s[...,[0,1, 4]], s[...,6:7]], dim=-1)
-        return s[...,[0,1,3]]    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
+        return s[...,[0,1]]    #reward_fn = lambda s, a, ns, d: torch.norm(ns[...,1:3], dim=-1, keepdim=False) 
     reward_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],
         # potential_hid_sizes=[8, 8],
@@ -377,7 +379,7 @@ def main(cfg: DictConfig):
 
     )
     primary_net = PredefinedRewardNet(
-            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=3, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=2, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],
         # potential_hid_sizes=[8, 8],
     )
@@ -409,8 +411,9 @@ def main(cfg: DictConfig):
     # print(learner_rewards_before_training)
 
     eval_env = DummyVecEnv([lambda: gym.make(env_id)] * 1)
-    eval_env.render(mode='human')
-    checkpoint_interval=3
+    if render:
+        eval_env.render(mode='human')
+    checkpoint_interval=5
     visualize_reward_gt(env_id='',log_dir=log_dir)
     
     def cb(round_num):
@@ -420,8 +423,9 @@ def main(cfg: DictConfig):
             for i in range(300):
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
-                eval_env.render(mode='human')
-                time.sleep(0.005)
+                if render:
+                    eval_env.render(mode='human')
+                    time.sleep(0.005)
             visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(gail_trainer._disc_step), "constraint", is_wandb, )
             visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(gail_trainer._disc_step), "primary", is_wandb, )
             visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(gail_trainer._disc_step), "total", is_wandb, )
