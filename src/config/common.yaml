@@ -17,7 +17,11 @@ disc:
   lr: 3e-4
   hid_size: 32
   normalize: None
-
+  reward_net_opt: AdamW
+  primary_net_opt: AdamW
+  constraint_net_opt: None
+  coef: [1.0, 1.0, 0.0, 0.1]
+  clip_range: 0.4
 gen:
   model: PPO2
   lr: 3e-4
