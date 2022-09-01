@@ -182,9 +182,11 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
                 # reward_fn=self.reward_train.predict_processed,
                 reward_fn= lambda *args:  self.reward_train.predict_processed(*args),# +self.constraint_train.predict_processed (*args),
                 # primary_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 *self.constraint_train.predict_processed(*args),
-                constraint_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
-                primary_fn=self.primary_train.predict_processed,
-                # constraint_fn=self.constraint_train.predict_processed,
+                # constraint_fn= lambda *args: 1.1 * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
+                primary_fn= lambda *args: -0.0 * self.reward_train.predict_processed(*args) + 1.0 * self.primary_train.predict_processed(*args),
+                # primary_fn=self.primary_train.predict_processed,
+                # constraint_fn= lambda *args: 1. * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
+                constraint_fn= lambda *args: 0.0 * self.reward_train.predict_processed(*args),
             )
             self.gen_callback = self.venv_wrapped.make_log_callback()
         self.venv_train = self.venv_wrapped
@@ -316,13 +318,13 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         is_expert: th.Tensor, 
         log_policy_act_prob: th.Tensor,
         primary_log_policy_act_prob: th.Tensor,
-        clip_range: float = 0.2,
+        clip_range: float = 0.4,
         #clip_range: Union[float, Schedule] = 0.2,
     ):
 
         const_output_train = self._primary_net(state, action, next_state, done)[~is_expert]
         ratio = th.exp(primary_log_policy_act_prob - log_policy_act_prob)
-        const_output_train = const_output_train * ratio
+        const_output_train = const_output_train *  th.clamp(ratio, 1 - clip_range, 1 + clip_range)
         return const_output_train.mean()
 
     def primary_expert(
@@ -347,13 +349,13 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         is_expert: th.Tensor, 
         log_policy_act_prob: th.Tensor,
         constraint_log_policy_act_prob: th.Tensor,
-        clip_range: float = 0.2,
+        clip_range: float = 0.4,
         #clip_range: Union[float, Schedule] = 0.2,
     ):
 
         const_output_train = self._reward_net(state, action, next_state, done)[~is_expert].detach() -self._primary_net(state, action, next_state, done)[~is_expert]
         ratio = th.exp(constraint_log_policy_act_prob - log_policy_act_prob)
-        const_output_train = const_output_train * ratio
+        const_output_train = const_output_train *  th.clamp(ratio, 1 - clip_range, 1 + clip_range)
         return const_output_train.mean()
 
     def const_expert(
@@ -558,8 +560,10 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["labels_expert_is_one"].long(), 
             )
             loss += 1.0*primary_loss 
-            loss += 1.0*const_loss 
-            loss += 0.1*(reg_loss  + reg_loss2 + reg_loss3)
+            # loss += 0.5*const_loss 
+            # loss += 0.1*(reg_loss  + reg_loss2 + reg_loss3)
+            # loss += 0.5*(reg_loss  + reg_loss2 + reg_loss3)
+            loss += 0.5 * (reg_loss + reg_loss2)
             #loss += const_loss2*0.1
             # do gradient step
 
@@ -584,7 +588,10 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
             self.logger.record("global_step", self._global_step)
 
             for k, v in train_stats.items():
-                self.logger.record(k, v)
+                if "acc" in k or "loss" in k:
+                    self.logger.record(k, v)
+                else:
+                    self.logger.record(k, v, exclude="stdout")
             self.logger.dump(self._disc_step)
             if write_summaries:
                 self._summary_writer.add_histogram("disc_logits", disc_logits.detach())
