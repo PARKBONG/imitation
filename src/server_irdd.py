@@ -100,10 +100,10 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
 
         plate_ang = 0.0
         num_y = 0
-        for pos in np.arange(-1.2, 1.2, 0.05):
+        for pos in np.arange(-1.5, 1.5, 0.05):
             num_y += 1
             num_x = 0
-            for ang in np.arange(-1.2, 1.2, 0.05):
+            for ang in np.arange(-1.5, 1.5, 0.05):
                 num_x += 1
                 obs = np.zeros(9)
                 """
@@ -125,8 +125,8 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 
                 obs[0] = 1.0
                 obs[1] = pos
-                obs[5] = pos
-                obs[7] = ang
+                # obs[5] = pos
+                obs[7] = np.tanh(ang)
                 obs_batch.append(obs)
 
                 action, _ = model.predict(obs, deterministic=True)
@@ -328,7 +328,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'irdd' + comment
-    wandb.init(project='server', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='new_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
