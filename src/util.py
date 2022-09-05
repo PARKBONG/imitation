@@ -13,8 +13,9 @@ def save(trainer, save_path):
     # We implement this here and not in Trainer since we do not want to actually
     # serialize the whole Trainer (including e.g. expert demonstrations).
     os.makedirs(save_path, exist_ok=True)
-    th.save(trainer.reward_train, os.path.join(save_path, "reward_train.pt"))
-    th.save(trainer.reward_test, os.path.join(save_path, "reward_test.pt"))
+    if isinstance(trainer._reward_net, RewardNet):
+        th.save(trainer.reward_train, os.path.join(save_path, "reward_train.pt"))
+        th.save(trainer.reward_test, os.path.join(save_path, "reward_test.pt"))
 
     if hasattr(trainer, "primary_train"):
         saving_net_train = trainer.primary_train
@@ -40,7 +41,7 @@ def save(trainer, save_path):
         trainer.gen_algo,
     )
 
-def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_wandb=False, ):
+def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_wandb=False, goal=1.0):
     import seaborn as sns
     import matplotlib.pyplot as plt
     grid_size = 0.1
@@ -53,17 +54,22 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
     pole_width = 0.15
     pole_height = 0.8
     anchor_height = 0.1
-    for itr in range(1):
+    grid_size = 0.05
+    rescale= int(1/grid_size)
+    boundary_low = -2.1
+    boundary_high = 2.1
+    for goal in [-1, 1]:
         obs_batch = []
         obs_action = []
         next_obs_batch = []
+        target = [0., goal]
 
         plate_ang = 0.0
         num_y = 0
-        for pos in np.arange(-1.2, 1.2, 0.05):
+        for pos in np.arange(boundary_low, boundary_high, grid_size):
             num_y += 1
             num_x = 0
-            for ang in np.arange(-1.2, 1.2, 0.05):
+            for ang in np.arange(boundary_low, boundary_high, grid_size):
                 num_x += 1
                 obs = np.zeros(9)
                 """
@@ -83,9 +89,10 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
-                obs[0] = 1.0
+                obs[0] = goal
                 obs[1] = pos
                 obs[5] = pos
+                # obs[7] = np.tanh(ang)
                 obs[7] = ang
                 obs_batch.append(obs)
 
@@ -127,15 +134,18 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                         z, levels=contours[:-1], colors='red')
         ax.invert_yaxis()
         plt.axis('off')
+
+        ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
+                    * rescale, marker='*', s=100, c='r', edgecolors='k', linewidths=0.5)
         if use_wandb:
-            wandb.log({f"rewards_map/{tag}": wandb.Image(plt)}, step=round_num)
+            wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
         print(score.reshape([num_x, num_y]))
         savedir = os.path.join(log_dir,"maps")
         if not os.path.exists(savedir):
             os.makedirs(savedir)
         print(savedir)
-        plt.savefig(savedir + '/%s_%s.png' % (itr, tag))
-        print('Save Itr', itr)
+        plt.savefig(savedir + '/%s_%s.png' % (goal, tag))
+        print('Save Itr', goal)
         plt.close()
 
 def visualize_reward_gt(env_id, log_dir, round_num=-1, tag='', use_wandb=False, ):

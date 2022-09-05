@@ -100,10 +100,10 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
 
         plate_ang = 0.0
         num_y = 0
-        for pos in np.arange(-1.2, 1.2, 0.05):
+        for pos in np.arange(-2.2, 2.2, 0.05):
             num_y += 1
             num_x = 0
-            for ang in np.arange(-1.2, 1.2, 0.05):
+            for ang in np.arange(-2.2, 2.2, 0.05):
                 num_x += 1
                 obs = np.zeros(9)
                 """
@@ -126,6 +126,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 obs[0] = 1.0
                 obs[1] = pos
                 obs[5] = pos
+                # obs[7] = np.tanh(ang)
                 obs[7] = ang
                 obs_batch.append(obs)
 
@@ -300,7 +301,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_imit","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -328,7 +329,8 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'irdd' + comment
-    wandb.init(project='server', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='brand_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -399,7 +401,7 @@ def main(cfg: DictConfig):
         log_dir=log_dir,
         primary_net=primary_net,
         constraint_net=constraint_net,
-        disc_opt_cls=th.optim.Adam,
+        disc_opt_cls=th.optim.AdamW,
         const_disc_opt_kwargs={"lr":disc_lr},
         primary_disc_opt_kwargs={"lr":disc_lr},
         custom_logger=custom_logger
@@ -426,9 +428,9 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(gail_trainer._disc_step), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(gail_trainer._disc_step), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(gail_trainer._disc_step), "total", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(round_num), "primary", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(round_num), "total", is_wandb, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )
     gail_trainer.train(int(10e6), callback=cb)  # Note: set to 300000 for better results
     learner_rewards_after_training, _ = evaluate_policy(

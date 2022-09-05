@@ -68,7 +68,8 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
         init_tensorboard_graph: bool = False,
         debug_use_ground_truth: bool = False,
         allow_variable_horizon: bool = False,
-        coef = [1.0, 1.0, 0.0, 0.1],
+        coef = [1.0, 1.0, 0.0],
+        reg_coef = [0.1, 0.1, 0.1],
         clip_range: float = 0.4,
     ):
         self.demo_batch_size = demo_batch_size
@@ -90,6 +91,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
         self._primary_net = primary_net.to(gen_algo.device)
 
         self.coef = coef
+        self.reg_coef = reg_coef
         self.clip_range = clip_range
         
         if disc_opt_cls:
@@ -101,7 +103,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
             constraint_fn = self.constraint_train.predict_processed
 
         if disc_opt_cls is None:
-            self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args) 
+            self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args).detach() 
             reward_fn = lambda *args: self.constraint_train.predict_processed(*args) + self.primary_train.predict_processed(*args)
 
         if const_disc_opt_cls is None:
@@ -160,7 +162,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
             venv = self.venv_wrapped = reward_wrapper.PrimaryConstRewardVecEnvWrapper(
                 venv,
                 reward_fn= reward_fn,
-                primary_fn= lambda *args: -0.0 * self.reward_train.predict_processed(*args) + 1.0 * self.primary_train.predict_processed(*args),
+                primary_fn= lambda *args:  1.0 * self.primary_train.predict_processed(*args),
                 constraint_fn= constraint_fn,
             )
             self.gen_callback = self.venv_wrapped.make_log_callback()
@@ -247,6 +249,12 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
 
     def reg(
         self,
+        *args,
+    ):
+        return self.exp_reg(*args) + self.gen_reg(*args)
+
+    def exp_reg(
+        self,
         net: reward_nets.RewardNet,
         state: th.Tensor,
         action: th.Tensor,
@@ -254,7 +262,19 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
         done: th.Tensor, 
         is_expert: th.Tensor, 
     ):
-        rew_output = net(state, action, next_state, done) 
+        rew_output = net(state, action, next_state, done)[is_expert]
+        return  (rew_output**2).mean()
+        
+    def gen_reg(
+        self,
+        net: reward_nets.RewardNet,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor, 
+    ):
+        rew_output = net(state, action, next_state, done)[~is_expert]
         return  (rew_output**2).mean()
 
     @property
@@ -329,7 +349,9 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
         Returns:
             Statistics for discriminator (e.g. loss, accuracy).
         """
-        self._reward_net.train()
+        if self._disc_opt_cls:
+            self._reward_net.train()
+
         self._primary_net.train()
         if self._const_disc_opt_cls:
             self._constraint_net.train()
@@ -432,15 +454,18 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["done"],
                 batch["labels_expert_is_one"].long(), 
             )
-            loss = self.coef[0] * (rew_expert_loss + rew_gen_loss)
 
             primary_loss = primary_expert_loss + primary_gen_loss
             const_loss = const_expert_loss + const_gen_loss
-            
+
+            loss = self.coef[0] * (rew_expert_loss + rew_gen_loss)
             loss += self.coef[1] * primary_loss
             loss += self.coef[2] * const_loss
-            loss += self.coef[3] * (reg_loss + reg_loss2)
-            
+            # loss += self.coef[3] * (reg_loss + reg_loss2+reg_loss3)
+            reg_loss = self.reg_coef[0] * reg_loss + \
+                        self.reg_coef[1] * reg_loss2 + \
+                            self.reg_coef[2] * reg_loss3
+            loss += reg_loss
             for op in self._disc_opt:
                 op.zero_grad()
             loss.backward()
@@ -466,8 +491,10 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
             if write_summaries:
                 self._summary_writer.add_histogram("disc_logits", disc_logits.detach())
 
-        self._reward_net.eval()
         self._primary_net.eval()
+
+        if self._disc_opt_cls:
+            self._reward_net.eval()
         if self._const_disc_opt_cls:
             self._constraint_net.eval()
         return train_stats
@@ -532,16 +559,16 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
         for r in tqdm.tqdm(range(0, n_rounds), desc="round"):
             self.train_gen(self.gen_train_timesteps)
             for _ in range(self.n_disc_updates_per_round):
-                with networks.training(self.reward_train):
+                # with networks.training(self.reward_train):
                     # switch to training mode (affects dropout, normalization)
-                    self.train_disc()
+                self.train_disc()
             if callback:
                 callback(r)
             self.logger.dump(self._global_step)
 
     def _torchify_array(self, ndarray: Optional[np.ndarray]) -> Optional[th.Tensor]:
         if ndarray is not None:
-            return th.as_tensor(ndarray, device=self.reward_train.device)
+            return th.as_tensor(ndarray, device=self.primary_train.device)
 
     def _get_log_policy_act_prob(
         self,
@@ -696,7 +723,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
                 const_log_policy_act_prob = const_log_policy_act_prob.reshape((n_samples,))
             del obs_th, acts_th, primary_acts_th, const_acts_th  # unneeded
 
-        obs_th, acts_th, next_obs_th, dones_th = self.reward_train.preprocess(
+        obs_th, acts_th, next_obs_th, dones_th = self.primary_train.preprocess(
             obs,
             acts,
             next_obs,
@@ -709,7 +736,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
             next_obs,
             dones,
         )
-        _, const_acts_th, _, _ = self.reward_train.preprocess(
+        _, const_acts_th, _, _ = self.primary_train.preprocess(
             obs,
             const_acts,
             next_obs,

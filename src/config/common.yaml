@@ -20,7 +20,8 @@ disc:
   reward_net_opt: AdamW
   primary_net_opt: AdamW
   constraint_net_opt: None
-  coef: [1.0, 1.0, 0.0, 0.1]
+  coef: [1.0, 1.0, 0.0]
+  reg_coef: [0.1, 0.1, 0.1]
   clip_range: 0.4
 gen:
   model: PPO2

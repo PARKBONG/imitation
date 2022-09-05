@@ -130,20 +130,20 @@ class IRDD3(base.DemonstrationAlgorithm[types.Transitions]):
         self.debug_use_ground_truth = debug_use_ground_truth
         self.venv = venv
         self.gen_algo = gen_algo
+        self._primary_net = primary_net.to(gen_algo.device)
         self._reward_net = reward_net.to(gen_algo.device)
 
-        self._primary_net = primary_net.to(gen_algo.device)
         # self._constraint_net = constraint_net.to(gen_algo.device)
 
         self._log_dir = log_dir
 
-        # Create graph for optimising/recording stats on discriminator
+        # Create graph for optimising/recording stats on discriminato
+        self._init_tensorboard = init_tensorboard
+        self._init_tensorboard_graph = init_tensorboard_graph
         self._disc_opt_cls = disc_opt_cls
         self._disc_opt_kwargs = disc_opt_kwargs or {}
         self._primary_disc_opt_kwargs = primary_disc_opt_kwargs or {}
         self._const_disc_opt_kwargs = const_disc_opt_kwargs or {}
-        self._init_tensorboard = init_tensorboard
-        self._init_tensorboard_graph = init_tensorboard_graph
         self._disc_opt = []
         self._disc_opt.append(
             self._disc_opt_cls(

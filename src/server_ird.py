@@ -57,6 +57,11 @@ def main(cfg: DictConfig):
     batch_size = int(cfg.gen.batch_size)
     n_epochs = int(cfg.gen.n_epochs)
     n_steps = int(cfg.gen.n_steps)
+
+    rew_opt = cfg.disc.reward_net_opt
+    primary_opt = cfg.disc.primary_net_opt
+    constraint_opt = cfg.disc.constraint_net_opt
+
     
     disc_lr = float(cfg.disc.lr)
     demo_batch_size = int(cfg.disc.demo_batch_size)
@@ -64,7 +69,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_imit","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -83,8 +88,8 @@ def main(cfg: DictConfig):
         comment = ""
     else:
         comment = f"_{str(cfg.comment)}"
-    name = 'irdd' + comment
-    wandb.init(project='server', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    name = 'ird' + comment
+    wandb.init(project='brand_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -129,12 +134,12 @@ def main(cfg: DictConfig):
         disc_opt_kwargs={"lr":disc_lr},
         log_dir=log_dir,
         primary_net=primary_net,
-        # constraint_net=constraint_net,
-        disc_opt_cls=th.optim.Adam,
-        primary_disc_opt_cls=th.optim.Adam,
+        constraint_net=constraint_net,
+        disc_opt_cls=opt_cls[rew_opt],
+        primary_disc_opt_cls=opt_cls[primary_opt],
         primary_disc_opt_kwargs={"lr":disc_lr},
-        # const_disc_opt_cls=th.optim.Adam,
-        # const_disc_opt_kwargs={"lr":disc_lr},
+        const_disc_opt_cls=opt_cls[constraint_opt],
+        const_disc_opt_kwargs={"lr":disc_lr},
         custom_logger=custom_logger
     )
     
@@ -154,9 +159,9 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(gail_trainer._disc_step), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(gail_trainer._disc_step), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(gail_trainer._disc_step), "total", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, env_id,log_dir,  int(round_num), "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(round_num), "primary", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(round_num), "total", is_wandb, )
     gail_trainer.train(int(total_steps), callback=cb)  
     
 
