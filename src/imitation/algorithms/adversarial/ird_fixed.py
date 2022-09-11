@@ -1,5 +1,5 @@
 """Adversarial Inverse Reinforcement Learning (AIRL)."""
-
+"""Core code for adversarial imitation learning, shared between GAIL and AIRL."""
 import abc
 import collections
 import dataclasses
@@ -29,15 +29,11 @@ from imitation.algorithms.adversarial import common
 from imitation.rewards import reward_nets
 
 from stable_baselines3.common.utils import obs_as_tensor, safe_mean
-
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 
 
-class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
-    """Adversarial Inverse Reinforcement Learning (`AIRL`_).
-
-    .. _AIRL: https://arxiv.org/abs/1710.11248
-    """
+class IRDFIX(base.DemonstrationAlgorithm[types.Transitions]):
+    """Base class for adversarial imitation learning algorithms like GAIL and AIRL."""
 
     venv: vec_env.VecEnv
     """The original vectorized environment."""
@@ -56,12 +52,16 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         gen_algo: base_class.BaseAlgorithm,
         reward_net: reward_nets.RewardNet,
         primary_net: reward_nets.RewardNet,
-        constraint_net: reward_nets.RewardNet,
+
+        gt_net: reward_nets.RewardNet,
+        constraint_net: Optional[reward_nets.RewardNet] = None,
         n_disc_updates_per_round: int = 2,
         log_dir: str = "output/",
-        disc_opt_cls: Type[th.optim.Optimizer] = th.optim.Adam,
+        disc_opt_cls: Type[th.optim.Optimizer] = None,
         disc_opt_kwargs: Optional[Mapping] = None,
+        primary_disc_opt_cls: Optional[Type[th.optim.Optimizer]] = th.optim.Adam,
         primary_disc_opt_kwargs: Optional[Mapping] = None,
+        const_disc_opt_cls: Optional[Type[th.optim.Optimizer]] = None,
         const_disc_opt_kwargs: Optional[Mapping] = None,
         gen_train_timesteps: Optional[int] = None,
         gen_replay_buffer_capacity: Optional[int] = None,
@@ -70,53 +70,10 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         init_tensorboard_graph: bool = False,
         debug_use_ground_truth: bool = False,
         allow_variable_horizon: bool = False,
+        coef = [1.0, 1.0, 0.0],
+        reg_coef = [0.1, 0.1, 0.1],
+        clip_range: float = 0.4,
     ):
-        """Builds AdversarialTrainer.
-        Args:
-            demonstrations: Demonstrations from an expert (optional). Transitions
-                expressed directly as a `types.TransitionsMinimal` object, a sequence
-                of trajectories, or an iterable of transition batches (mappings from
-                keywords to arrays containing observations, etc).
-            demo_batch_size: The number of samples in each batch of expert data. The
-                discriminator batch size is twice this number because each discriminator
-                batch contains a generator sample for every expert sample.
-            venv: The vectorized environment to train in.
-            gen_algo: The generator RL algorithm that is trained to maximize
-                discriminator confusion. Environment and logger will be set to
-                `venv` and `custom_logger`.
-            reward_net: a Torch module that takes an observation, action and
-                next observation tensors as input and computes a reward signal.
-            n_disc_updates_per_round: The number of discriminator updates after each
-                round of generator updates in AdversarialTrainer.learn().
-            log_dir: Directory to store TensorBoard logs, plots, etc. in.
-            disc_opt_cls: The optimizer for discriminator training.
-            disc_opt_kwargs: Parameters for discriminator training.
-            gen_train_timesteps: The number of steps to train the generator policy for
-                each iteration. If None, then defaults to the batch size (for on-policy)
-                or number of environments (for off-policy).
-            gen_replay_buffer_capacity: The capacity of the
-                generator replay buffer (the number of obs-action-obs samples from
-                the generator that can be stored). By default this is equal to
-                `gen_train_timesteps`, meaning that we sample only from the most
-                recent batch of generator samples.
-            custom_logger: Where to log to; if None (default), creates a new logger.
-            init_tensorboard: If True, makes various discriminator
-                TensorBoard summaries.
-            init_tensorboard_graph: If both this and `init_tensorboard` are True,
-                then write a Tensorboard graph summary to disk.
-            debug_use_ground_truth: If True, use the ground truth reward for
-                `self.train_env`.
-                This disables the reward wrapping that would normally replace
-                the environment reward with the learned reward. This is useful for
-                sanity checking that the policy training is functional.
-            allow_variable_horizon: If False (default), algorithm will raise an
-                exception if it detects trajectories of different length during
-                training. If True, overrides this safety check. WARNING: variable
-                horizon episodes leak information about the reward via termination
-                condition, and can seriously confound evaluation. Read
-                https://imitation.readthedocs.io/en/latest/guide/variable_horizon.html
-                before overriding this.
-        """
         self.demo_batch_size = demo_batch_size
         self._demo_data_loader = None
         self._endless_expert_iterator = None
@@ -133,40 +90,47 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         self.debug_use_ground_truth = debug_use_ground_truth
         self.venv = venv
         self.gen_algo = gen_algo
-
         self._primary_net = primary_net.to(gen_algo.device)
+
+        self.coef = coef
+        self.reg_coef = reg_coef
+        self.clip_range = clip_range
+        
         self._constraint_net = constraint_net.to(gen_algo.device)
-        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args)#.detach() 
+        constraint_fn = self.constraint_train.predict_processed
+        self._gt_net = gt_net.to(gen_algo.device)
+
+        self._reward_net =lambda *args: self._constraint_net(*args) + self._gt_net(*args).detach() 
+        reward_fn = lambda *args: self.constraint_train.predict_processed(*args) + self._gt_net.predict_processed(*args)
 
         self._log_dir = log_dir
 
-        # Create graph for optimising/recording stats on discriminator
+        self._init_tensorboard = init_tensorboard
+        self._init_tensorboard_graph = init_tensorboard_graph
         self._disc_opt_cls = disc_opt_cls
         self._disc_opt_kwargs = disc_opt_kwargs or {}
         self._primary_disc_opt_kwargs = primary_disc_opt_kwargs or {}
         self._const_disc_opt_kwargs = const_disc_opt_kwargs or {}
-        self._init_tensorboard = init_tensorboard
-        self._init_tensorboard_graph = init_tensorboard_graph
         self._disc_opt = []
-        # self._disc_opt.append(
-        #     self._disc_opt_cls(
-        #         self._reward_net.parameters(),
-        #         **self._disc_opt_kwargs,
-        #     )
-        # )
-        self._disc_opt.append(
-            self._disc_opt_cls(
-                self._primary_net.parameters(),
-                **self._primary_disc_opt_kwargs,
+
+           
+        self._primary_disc_opt_cls = primary_disc_opt_cls
+        if self._primary_disc_opt_cls:
+            self._disc_opt.append(
+                self._primary_disc_opt_cls(
+                    self._primary_net.parameters(),
+                    **self._primary_disc_opt_kwargs,
+                )
+            ) 
+        self._const_disc_opt_cls = const_disc_opt_cls
+        if self._const_disc_opt_cls:
+            self._disc_opt.append(
+                self._const_disc_opt_cls(
+                    self._constraint_net.parameters(),
+                    **self._const_disc_opt_kwargs,
+                )
             )
-        )
-        self._disc_opt.append(
-            self._disc_opt_cls(
-                self._constraint_net.parameters(),
-                **self._const_disc_opt_kwargs,
-            )
-        )
-        
+            
         if self._init_tensorboard:
             logging.info("building summary directory at " + self._log_dir)
             summary_dir = os.path.join(self._log_dir, "summary")
@@ -182,12 +146,9 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         else:
             venv = self.venv_wrapped = reward_wrapper.PrimaryConstRewardVecEnvWrapper(
                 venv,
-                # reward_fn=self.reward_train.predict_processed,
-                reward_fn= lambda *args:  self.primary_train.predict_processed(*args) +self.constraint_train.predict_processed (*args),
-                # primary_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 *self.constraint_train.predict_processed(*args),
-                # constraint_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
-                primary_fn=self.primary_train.predict_processed,
-                constraint_fn=self.constraint_train.predict_processed,
+                reward_fn= reward_fn,
+                primary_fn= lambda *args:  1.0 * self._gt_net.predict_processed(*args),
+                constraint_fn=lambda *args: 0.5 * constraint_fn(*args) + 0.5 * self._primary_net.predict_processed(*args),
             )
             self.gen_callback = self.venv_wrapped.make_log_callback()
         self.venv_train = self.venv_wrapped
@@ -225,64 +186,81 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
 
     def logits_expert_is_high(
         self,
+        net: reward_nets.RewardNet,
         state: th.Tensor,
         action: th.Tensor,
         next_state: th.Tensor,
         done: th.Tensor,
         log_policy_act_prob: th.Tensor,
     ) -> th.Tensor:
-        r"""Compute the discriminator's logits for each state-action sample.
-        In Fu's AIRL paper (https://arxiv.org/pdf/1710.11248.pdf), the
-        discriminator output was given as
-        .. math::
-            D_{\theta}(s,a) =
-            \frac{ \exp{r_{\theta}(s,a)} } { \exp{r_{\theta}(s,a)} + \pi(a|s) }
-        with a high value corresponding to the expert and a low value corresponding to
-        the generator.
-        In other words, the discriminator output is the probability that the action is
-        taken by the expert rather than the generator.
-        The logit of the above is given as
-        .. math::
-            \operatorname{logit}(D_{\theta}(s,a)) = r_{\theta}(s,a) - \log{ \pi(a|s) }
-        which is what is returned by this function.
-        Args:
-            state: The state of the environment at the time of the action.
-            action: The action taken by the expert or generator.
-            next_state: The state of the environment after the action.
-            done: whether a `terminal state` (as defined under the MDP of the task) has
-                been reached.
-            log_policy_act_prob: The log probability of the action taken by the
-                generator, :math:`\log{ \pi(a|s) }`.
-        Returns:
-            The logits of the discriminator for each state-action sample.
-        Raises:
-            TypeError: If `log_policy_act_prob` is None.
-        """
         if log_policy_act_prob is None:
             raise TypeError(
                 "Non-None `log_policy_act_prob` is required for this method.",
             )
-        #reward_output_train = self._reward_net(state, action, next_state, done)
 
-        primary_output_train = self._reward_net(state, action, next_state, done)
-        # const_output_train = self._constraint_net(state, action, next_state, done)
-        # return primary_output_train + const_output_train.detach() - log_policy_act_prob
-        return primary_output_train - log_policy_act_prob
+        output_train = net(state, action, next_state, done)
+        return output_train - log_policy_act_prob
 
-    def primary_logits_expert_is_high(
+    def expert_loss(
         self,
+        net: reward_nets.RewardNet,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor,
+    ):
+        output_train = net(state, action, next_state, done)[is_expert]
+        reward = - output_train + 0.5 * output_train ** 2 
+        return reward.mean()
+
+    def gen_loss(
+        self,
+        net: reward_nets.RewardNet,
         state: th.Tensor,
         action: th.Tensor,
         next_state: th.Tensor,
         done: th.Tensor,
-        primary_log_policy_act_prob: th.Tensor,
-    ) -> th.Tensor:
-        if primary_log_policy_act_prob is None:
-            raise TypeError(
-                "Non-None `log_policy_act_prob` is required for this method.",
-            )
-        const_output_train = self._primary_net(state, action, next_state, done)
-        return const_output_train - primary_log_policy_act_prob
+        is_expert: th.Tensor, 
+        log_policy_act_prob: th.Tensor,
+        custom_log_policy_act_prob: Optional[th.Tensor] = None,
+    ):
+
+        reward = net(state, action, next_state, done)[~is_expert]
+        if custom_log_policy_act_prob is not None:
+            ratio = th.exp(custom_log_policy_act_prob - log_policy_act_prob)
+            reward = reward *  th.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
+        return reward.mean() 
+
+    def reg(
+        self,
+        *args,
+    ):
+        return self.exp_reg(*args) + self.gen_reg(*args)
+
+    def exp_reg(
+        self,
+        net: reward_nets.RewardNet,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor, 
+    ):
+        rew_output = net(state, action, next_state, done)[is_expert]
+        return  (rew_output**2).mean()
+        
+    def gen_reg(
+        self,
+        net: reward_nets.RewardNet,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor, 
+    ):
+        rew_output = net(state, action, next_state, done)[~is_expert]
+        return  (rew_output**2).mean()
 
     @property
     def reward_train(self) -> reward_nets.RewardNet:
@@ -298,19 +276,6 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         return reward_net
 
     @property
-    def constraint_train(self) -> reward_nets.RewardNet:
-        return self._constraint_net
-
-    @property
-    def constraint_test (self) -> reward_nets.RewardNet:
-        """Returns the unshaped version of reward network used for testing."""
-        reward_net = self._constraint_net
-        # Recursively return the base network of the wrapped reward net
-        while isinstance(reward_net, reward_nets.RewardNetWrapper):
-            reward_net = reward_net.base
-        return reward_net
-
-    @property
     def primary_train(self) -> reward_nets.RewardNet:
         return self._primary_net
 
@@ -318,6 +283,20 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
     def primary_test (self) -> reward_nets.RewardNet:
         """Returns the unshaped version of reward network used for testing."""
         reward_net = self._primary_net
+        # Recursively return the base network of the wrapped reward net
+        while isinstance(reward_net, reward_nets.RewardNetWrapper):
+            reward_net = reward_net.base
+        return reward_net
+
+
+    @property
+    def constraint_train(self) -> reward_nets.RewardNet:
+        return self._constraint_net
+
+    @property
+    def constraint_test (self) -> reward_nets.RewardNet:
+        """Returns the unshaped version of reward network used for testing."""
+        reward_net = self._constraint_net
         # Recursively return the base network of the wrapped reward net
         while isinstance(reward_net, reward_nets.RewardNetWrapper):
             reward_net = reward_net.base
@@ -355,9 +334,12 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         Returns:
             Statistics for discriminator (e.g. loss, accuracy).
         """
-        # self._reward_net.train()
+        if self._disc_opt_cls:
+            self._reward_net.train()
+
         self._primary_net.train()
-        self._constraint_net.train()
+        if self._const_disc_opt_cls:
+            self._constraint_net.train()
         with self.logger.accumulate_means("disc"):
             # optionally write TB summaries for collected ops
             write_summaries = self._init_tensorboard and self._global_step % 20 == 0
@@ -368,30 +350,107 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
                 expert_samples=expert_samples,
             )
             disc_logits = self.logits_expert_is_high(
+                self._reward_net,
                 batch["state"],
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
                 batch["log_policy_act_prob"],
             )
-            loss = F.binary_cross_entropy_with_logits(
-                disc_logits,
-                batch["labels_expert_is_one"].float(),
+            rew_expert_loss = self.expert_loss(
+                self._reward_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+            )
+            rew_gen_loss = self.gen_loss(
+                self._reward_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+                batch["log_policy_act_prob"],
             )
 
-            primary_disc_logits = self.primary_logits_expert_is_high(
+            primary_expert_loss = self.expert_loss(
+                self._primary_net,
                 batch["state"],
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["log_policy_act_prob"],
+                batch["labels_expert_is_one"].long(),
             )
-            primary_loss =F.binary_cross_entropy_with_logits(
-                primary_disc_logits,
-                batch["labels_expert_is_one"].float(),
-            ) 
+            primary_gen_loss = self.gen_loss(
+                self._primary_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+                batch["log_policy_act_prob"],
+                batch["primary_log_policy_act_prob"],
+            )
+
+            const_expert_loss = self.expert_loss(
+                self._constraint_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+            )
+            const_gen_loss = self.gen_loss(
+                self._constraint_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+                batch["log_policy_act_prob"],
+                batch["const_log_policy_act_prob"],
+            )
             
-            loss += 1.0*primary_loss 
+            reg_loss =self.reg(
+                self._reward_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(), 
+            )
+
+            reg_loss2 =self.reg(
+                self._primary_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(), 
+            )
+
+            reg_loss3 =self.reg(
+                self._constraint_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(), 
+            )
+
+            primary_loss = primary_expert_loss + primary_gen_loss
+            const_loss = const_expert_loss + const_gen_loss
+
+            loss = self.coef[0] * (rew_expert_loss + rew_gen_loss)
+            loss += self.coef[1] * primary_loss
+            loss += self.coef[2] * const_loss
+            # loss += self.coef[3] * (reg_loss + reg_loss2+reg_loss3)
+            reg_loss = self.reg_coef[0] * reg_loss + \
+                        self.reg_coef[1] * reg_loss2 + \
+                            self.reg_coef[2] * reg_loss3
+            loss += reg_loss
             for op in self._disc_opt:
                 op.zero_grad()
             loss.backward()
@@ -409,15 +468,20 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
             self.logger.record("global_step", self._global_step)
 
             for k, v in train_stats.items():
-                self.logger.record(k, v)
+                if "acc" in k or "loss" in k:
+                    self.logger.record(k, v)
+                else:
+                    self.logger.record(k, v, exclude="stdout")
             self.logger.dump(self._disc_step)
             if write_summaries:
                 self._summary_writer.add_histogram("disc_logits", disc_logits.detach())
-                self._summary_writer.add_histogram("disc_logits(primary)", primary_disc_logits.detach())
 
-        # self._reward_net.eval()
         self._primary_net.eval()
-        self._constraint_net.eval()
+
+        if self._disc_opt_cls:
+            self._reward_net.eval()
+        if self._const_disc_opt_cls:
+            self._constraint_net.eval()
         return train_stats
 
     def train_gen(
@@ -539,15 +603,12 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         expert_samples: Optional[Mapping] = None,
     ) -> Mapping[str, th.Tensor]:
         """Build and return training batch for the next discriminator update.
-
         Args:
             gen_samples: Same as in `train_disc`.
             expert_samples: Same as in `train_disc`.
-
         Returns:
             The training batch: state, action, next state, dones, labels
             and policy log-probabilities.
-
         Raises:
             RuntimeError: Empty generator replay buffer.
             ValueError: `gen_samples` or `expert_samples` batch size is
@@ -603,6 +664,24 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         dones = np.concatenate([expert_samples["dones"], gen_samples["dones"]])
         # notice that the labels use the convention that expert samples are
         # labelled with 1 and generator samples with 0.
+
+        with th.no_grad():
+            # Convert to pytorch tensor or to TensorDict
+            obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
+            actions, values, log_probs = self.const_policy(obs_tensor)
+            actions = actions.detach().cpu().numpy()
+            assert actions.shape == gen_samples["acts"].shape
+        const_acts = np.concatenate([expert_samples["acts"], actions])
+
+
+        with th.no_grad():
+            # Convert to pytorch tensor or to TensorDict
+            obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
+            primary_actions, values, log_probs = self.primary_policy(obs_tensor)
+            primary_actions = primary_actions.detach().cpu().numpy()
+            assert primary_actions.shape == gen_samples["acts"].shape
+        primary_acts = np.concatenate([expert_samples["acts"], primary_actions])
+
         labels_expert_is_one = np.concatenate(
             [np.ones(n_expert, dtype=int), np.zeros(n_gen, dtype=int)],
         )
@@ -611,11 +690,23 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         with th.no_grad():
             obs_th = th.as_tensor(obs, device=self.gen_algo.device)
             acts_th = th.as_tensor(acts, device=self.gen_algo.device)
+
+            primary_acts_th = th.as_tensor(primary_acts, device=self.gen_algo.device)
+            const_acts_th = th.as_tensor(const_acts, device=self.gen_algo.device)
+
             log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th)
+            primary_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.primary_policy)
+            const_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.const_policy)
             if log_policy_act_prob is not None:
                 assert len(log_policy_act_prob) == n_samples
                 log_policy_act_prob = log_policy_act_prob.reshape((n_samples,))
-            del obs_th, acts_th  # unneeded
+            if primary_log_policy_act_prob is not None:
+                assert len(primary_log_policy_act_prob) == n_samples
+                primary_log_policy_act_prob = primary_log_policy_act_prob.reshape((n_samples,))
+            if const_log_policy_act_prob is not None:
+                assert len(const_log_policy_act_prob) == n_samples
+                const_log_policy_act_prob = const_log_policy_act_prob.reshape((n_samples,))
+            del obs_th, acts_th, primary_acts_th, const_acts_th  # unneeded
 
         obs_th, acts_th, next_obs_th, dones_th = self.primary_train.preprocess(
             obs,
@@ -623,13 +714,31 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
             next_obs,
             dones,
         )
+
+        _, primary_acts_th, _, _ = self.primary_train.preprocess(
+            obs,
+            primary_acts,
+            next_obs,
+            dones,
+        )
+        _, const_acts_th, _, _ = self.primary_train.preprocess(
+            obs,
+            const_acts,
+            next_obs,
+            dones,
+        )
+
         batch_dict = {
             "state": obs_th,
             "action": acts_th,
+            "primary_action": primary_acts_th,
+            "const_action": const_acts_th,
             "next_state": next_obs_th,
             "done": dones_th,
             "labels_expert_is_one": self._torchify_array(labels_expert_is_one),
             "log_policy_act_prob": log_policy_act_prob,
+            "primary_log_policy_act_prob": primary_log_policy_act_prob,
+            "const_log_policy_act_prob": const_log_policy_act_prob,
         }
 
         return batch_dict

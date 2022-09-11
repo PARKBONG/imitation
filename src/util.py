@@ -19,23 +19,21 @@ def save(trainer, save_path):
 
     if hasattr(trainer, "primary_train"):
         saving_net_train = trainer.primary_train
+        th.save(saving_net_train, os.path.join(save_path, "primary_train.pt"))
         saving_net_test = trainer.primary_test
-        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
-            saving_net_train = saving_net_train.base
         while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
             saving_net_test = saving_net_test.base
-        th.save(saving_net_train.mlp, os.path.join(save_path, "primary_train.pt"))
-        th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
+        if hasattr(saving_net_train, "mlp"):
+            th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
 
     if hasattr(trainer, "constraint_train") and isinstance(trainer._constraint_net, RewardNet):
         saving_net_train = trainer.constraint_train
+        th.save(saving_net_train, os.path.join(save_path, "constraint_train.pt"))
         saving_net_test = trainer.constraint_test
-        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
-            saving_net_train = saving_net_train.base
         while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
             saving_net_test = saving_net_test.base
-        th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_test.pt"))
-        th.save(saving_net_test.mlp, os.path.join(save_path, "constraint_train.pt"))
+        if hasattr(saving_net_train, "mlp"):
+            th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_test.pt"))
     serialize.save_stable_model(
         os.path.join(save_path, "gen_policy"),
         trainer.gen_algo,

@@ -33,7 +33,7 @@ from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 
 
-class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
+class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
     """Adversarial Inverse Reinforcement Learning (`AIRL`_).
 
     .. _AIRL: https://arxiv.org/abs/1710.11248
@@ -56,6 +56,7 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         gen_algo: base_class.BaseAlgorithm,
         reward_net: reward_nets.RewardNet,
         primary_net: reward_nets.RewardNet,
+        gt_net: reward_nets.RewardNet,
         constraint_net: reward_nets.RewardNet,
         n_disc_updates_per_round: int = 2,
         log_dir: str = "output/",
@@ -133,10 +134,12 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         self.debug_use_ground_truth = debug_use_ground_truth
         self.venv = venv
         self.gen_algo = gen_algo
+        self._gt_net = gt_net.to(gen_algo.device)
 
-        self._primary_net = primary_net.to(gen_algo.device)
+        self._primary_net = gt_net.to(gen_algo.device)
         self._constraint_net = constraint_net.to(gen_algo.device)
-        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args)#.detach() 
+        self._reward_net =lambda *args: self._constraint_net(*args) + self._gt_net(*args).detach() 
+        reward_fn = lambda *args: self.constraint_train.predict_processed(*args) + self._gt_net.predict_processed(*args)
 
         self._log_dir = log_dir
 
@@ -154,12 +157,12 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         #         **self._disc_opt_kwargs,
         #     )
         # )
-        self._disc_opt.append(
-            self._disc_opt_cls(
-                self._primary_net.parameters(),
-                **self._primary_disc_opt_kwargs,
-            )
-        )
+        # self._disc_opt.append(
+        #     self._disc_opt_cls(
+        #         self._primary_net.parameters(),
+        #         **self._primary_disc_opt_kwargs,
+        #     )
+        # )
         self._disc_opt.append(
             self._disc_opt_cls(
                 self._constraint_net.parameters(),
@@ -183,7 +186,7 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
             venv = self.venv_wrapped = reward_wrapper.PrimaryConstRewardVecEnvWrapper(
                 venv,
                 # reward_fn=self.reward_train.predict_processed,
-                reward_fn= lambda *args:  self.primary_train.predict_processed(*args) +self.constraint_train.predict_processed (*args),
+                reward_fn= reward_fn,
                 # primary_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 *self.constraint_train.predict_processed(*args),
                 # constraint_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
                 primary_fn=self.primary_train.predict_processed,

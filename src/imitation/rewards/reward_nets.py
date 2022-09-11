@@ -366,6 +366,56 @@ class ScaledRewardNet(RewardNet):
 
         return outputs * 10.0
 
+class FixedRewardNet(RewardNet):
+    """MLP that takes as input the state, action, next state and done flag.
+
+    These inputs are flattened and then concatenated to one another. Each input
+    can enabled or disabled by the `use_*` constructor keyword arguments.
+    """
+
+    def __init__(
+        self,
+        observation_space: gym.Space,
+        action_space: gym.Space,
+        reward_fn,
+        combined_size,
+        use_action = True,
+        **kwargs,
+    ):
+        """Builds reward MLP.
+
+        Args:
+            observation_space: The observation space.
+            action_space: The action space.
+            use_state: should the current state be included as an input to the MLP?
+            use_action: should the current action be included as an input to the MLP?
+            use_next_state: should the next state be included as an input to the MLP?
+            use_done: should the "done" flag be included as an input to the MLP?
+            kwargs: passed straight through to `build_mlp`.
+        """
+        super().__init__(observation_space, action_space)
+        combined_size = combined_size
+
+        self.use_action = use_action
+        if self.use_action:
+            combined_size += preprocessing.get_flattened_obs_dim(action_space)
+        self.reward_fn = reward_fn
+
+    def forward(self, state, action, next_state, done):
+        outputs = self.reward_fn(state, action, next_state, done)
+
+        assert outputs.shape == state.shape[:1]
+        return outputs
+       
+    @property
+    def device(self) -> th.device:
+        """Heuristic to determine which device this module is on."""
+        try:
+            first_param = next(self.parameters())
+            return first_param.device
+        except StopIteration:
+            # if the model has no parameters, we use the CPU
+            return th.device("cuda") 
 class PredefinedRewardNet(RewardNet):
     """MLP that takes as input the state, action, next state and done flag.
 
