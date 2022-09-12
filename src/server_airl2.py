@@ -35,7 +35,7 @@ def make_env(env_id, rank, seed=0):
     return _init
 
 def reward_fn(s, a, ns, d):
-    return s[...,[0,1]]    
+    return s[...,[0,2,]]    
 combined_size  = 2
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
@@ -70,7 +70,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_final","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'ird' + comment
-    wandb.init(project='brand_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='test_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -124,9 +124,9 @@ def main(cfg: DictConfig):
             venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],
     )
-    reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
-    constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
-    primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
+    # reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
+    # constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
+    # primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
     gail_trainer = AIRL2(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,

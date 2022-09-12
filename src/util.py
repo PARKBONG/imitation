@@ -19,26 +19,27 @@ def save(trainer, save_path):
 
     if hasattr(trainer, "primary_train"):
         saving_net_train = trainer.primary_train
-        th.save(saving_net_train, os.path.join(save_path, "primary_train.pt"))
         saving_net_test = trainer.primary_test
+        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
+            saving_net_train = saving_net_train.base
         while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
             saving_net_test = saving_net_test.base
-        if hasattr(saving_net_train, "mlp"):
-            th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
+        th.save(saving_net_train.mlp, os.path.join(save_path, "primary_train.pt"))
+        th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
 
     if hasattr(trainer, "constraint_train") and isinstance(trainer._constraint_net, RewardNet):
         saving_net_train = trainer.constraint_train
-        th.save(saving_net_train, os.path.join(save_path, "constraint_train.pt"))
         saving_net_test = trainer.constraint_test
+        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
+            saving_net_train = saving_net_train.base
         while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
             saving_net_test = saving_net_test.base
-        if hasattr(saving_net_train, "mlp"):
-            th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_test.pt"))
+        th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_test.pt"))
+        th.save(saving_net_test.mlp, os.path.join(save_path, "constraint_train.pt"))
     serialize.save_stable_model(
         os.path.join(save_path, "gen_policy"),
         trainer.gen_algo,
     )
-
 def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_wandb=False, goal=1.0):
     import seaborn as sns
     import matplotlib.pyplot as plt
@@ -56,7 +57,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
     rescale= int(1/grid_size)
     boundary_low = -2.1
     boundary_high = 2.1
-    for goal in [-1, 1]:
+    for goal in [-0.8, 0.8]:
         obs_batch = []
         obs_action = []
         next_obs_batch = []
@@ -69,7 +70,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
             num_x = 0
             for ang in np.arange(boundary_low, boundary_high, grid_size):
                 num_x += 1
-                obs = np.zeros(9)
+                obs = np.zeros(8)
                 """
                 <state type="xpos" body="goal"/>    ## 0
                 <state type="xpos" body="plate"/>   ## 1
@@ -87,11 +88,11 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
-                obs[0] = goal
-                obs[1] = pos
-                obs[5] = pos
+                # obs[0] = goal
+                obs[0] = pos-goal
+                obs[4] = pos
                 # obs[7] = np.tanh(ang)
-                obs[7] = ang
+                obs[6] = ang
                 obs_batch.append(obs)
 
                 action, _ = model.predict(obs, deterministic=True)
@@ -136,6 +137,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
         ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
                     * rescale, marker='*', s=100, c='r', edgecolors='k', linewidths=0.5)
         if use_wandb:
+            print(round_num)
             wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
         print(score.reshape([num_x, num_y]))
         savedir = os.path.join(log_dir,"maps")

@@ -63,7 +63,7 @@ def main(cfg: DictConfig):
     primary_opt = cfg.disc.primary_net_opt
     constraint_opt = cfg.disc.constraint_net_opt
 
-    
+    project_name = cfg.project 
     disc_lr = float(cfg.disc.lr)
     demo_batch_size = int(cfg.disc.demo_batch_size)
     gen_replay_buffer_capacity = int(cfg.disc.gen_replay_buffer_capacity)
@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'ird' + comment
-    wandb.init(project='brand_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project=project_name, sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(

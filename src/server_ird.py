@@ -36,7 +36,7 @@ def make_env(env_id, rank, seed=0):
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     def reward_fn(s, a, ns, d):
-        return s[...,[0,1]]    
+        return s[...,[0,2,]]    
     combined_size  = 2
     
     normalize_layer = {"None":None, "RunningNorm":RunningNorm}
@@ -69,7 +69,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_final","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -89,7 +89,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'ird' + comment
-    wandb.init(project='brand_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='test_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -146,22 +146,22 @@ def main(cfg: DictConfig):
     eval_env = DummyVecEnv([lambda: gym.make(env_id)] * 1)
     if render:
         eval_env.render(mode='human')
-    checkpoint_interval=5
+    checkpoint_interval=10
     visualize_reward_gt(env_id='',log_dir=log_dir)
     
     def cb(round_num):
         if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:
             save(gail_trainer, os.path.join(log_dir, "checkpoints", f"{round_num:05d}"))
             obs = eval_env.reset()
-            for i in range(300):
+            for i in range(400):
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
                 if render:
                     eval_env.render(mode='human')
-                    time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(round_num), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(round_num), "total", is_wandb, )
+                    # time.sleep(0.005)
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, env_id,log_dir, round_num // checkpoint_interval, "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  round_num // checkpoint_interval, "primary", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  round_num // checkpoint_interval, "total", is_wandb, )
     gail_trainer.train(int(total_steps), callback=cb)  
     
 

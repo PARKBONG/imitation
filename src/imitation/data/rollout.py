@@ -389,20 +389,20 @@ def generate_trajectories(
     # `trajectories` sooner. Shuffle to avoid bias in order. This is important
     # when callees end up truncating the number of trajectories or transitions.
     # It is also cheap, since we're just shuffling pointers.
-    """
+    """dd
    
     for t in trajectories:
         if t.infos is not None:
             ep_return = t.infos[-1].get("episode", {}).get("r")
             if ep_return is not None:
                 monitor_ep_returns.append(ep_return) 
+    """
     new_trajs = []
     for traj in trajectories:
         if len(traj) == 100:
-            if traj.infos[-1].get("episode", {}).get("r") > 210:
+            if traj.infos[-1].get("episode", {}).get("r") > 160:
                 new_trajs.append(traj)
     trajectories = new_trajs
-    """
     rng.shuffle(trajectories)
 
     # Sanity checks.
