@@ -15,6 +15,7 @@ from imitation.util import util
 import torch as th
 import time
 
+from imitation.algorithms.adversarial.airl3 import AIRL3
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
@@ -33,11 +34,11 @@ def make_env(env_id, rank, seed=0):
         return env
     return _init
 
+def reward_fn(s, a, ns, d):
+    return s[...,[0,1,2,3,4]]    
+combined_size  = 5
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
-    def reward_fn(s, a, ns, d):
-        return s[...,[0,1,2,3,4,]]    
-    combined_size  = 5
     
     normalize_layer = {"None":None, "RunningNorm":RunningNorm}
     opt_cls = {"None":None, "Adam":th.optim.Adam, "AdamW": th.optim.AdamW}
@@ -107,30 +108,26 @@ def main(cfg: DictConfig):
         target_kl=target_kl,
         n_epochs=n_epochs,
         n_steps=n_steps,
-        policy_kwargs={'optimizer_class':th.optim.Adam},
+        policy_kwargs={'optimizer_class':th.optim.Adam, },#'net_arch':[64,64]},
         tensorboard_log='./logs/',
         device=device,
     )
     reward_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
-        scaler=1,
         hid_sizes=[hid_size, hid_size],
     )
     constraint_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
-        scaler=1,
         hid_sizes=[hid_size, hid_size],
     )
     primary_net = PredefinedRewardNet(
             venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],
-        scaler=1,
     )
-
     reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
     constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
     primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
-    gail_trainer = IRD(
+    gail_trainer = AIRL3(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -143,10 +140,10 @@ def main(cfg: DictConfig):
         primary_net=primary_net,
         constraint_net=constraint_net,
         disc_opt_cls=opt_cls[rew_opt],
-        primary_disc_opt_cls=opt_cls[primary_opt],
-        primary_disc_opt_kwargs={"lr":disc_lr},
-        const_disc_opt_cls=opt_cls[constraint_opt],
-        const_disc_opt_kwargs={"lr":disc_lr},
+        # primary_disc_opt_cls=opt_cls[primary_opt],
+        # primary_disc_opt_kwargs={"lr":disc_lr},
+        # const_disc_opt_cls=opt_cls[constraint_opt],
+        # const_disc_opt_kwargs={"lr":disc_lr},
         custom_logger=custom_logger
     )
     
@@ -160,15 +157,15 @@ def main(cfg: DictConfig):
         if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:
             save(gail_trainer, os.path.join(log_dir, "checkpoints", f"{round_num:05d}"))
             obs = eval_env.reset()
-            for i in range(400):
+            for i in range(300):
                 action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
                 obs, _, _, _= eval_env.step(action)
                 if render:
                     eval_env.render(mode='human')
-                    # time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, env_id,log_dir, round_num // checkpoint_interval, "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  round_num // checkpoint_interval, "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  round_num // checkpoint_interval, "total", is_wandb, )
+                    time.sleep(0.005)
+            visualize_reward(gail_trainer.gen_algo,lambda *args: 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(round_num), "primary", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(round_num), "total", is_wandb, )
     gail_trainer.train(int(total_steps), callback=cb)  
     
 

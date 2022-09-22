@@ -107,7 +107,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
             reward_fn = lambda *args: self.constraint_train.predict_processed(*args) + self.primary_train.predict_processed(*args)
 
         if const_disc_opt_cls is None:
-            self._constraint_net = lambda *args: self._reward_net(*args) - self._primary_net(*args)
+            self._constraint_net = lambda *args: self._reward_net(*args).detach() - self._primary_net(*args)
             constraint_fn = lambda *args: 1. * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args)
             
         self._log_dir = log_dir
@@ -226,7 +226,9 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
         is_expert: th.Tensor,
     ):
         output_train = net(state, action, next_state, done)[is_expert]
-        reward = - output_train + 0.5 * output_train ** 2 
+        # with th.no_grad():
+        #     phi_grad = 1/(1+output_train)**2
+        reward = - 1. * output_train + 0.5 * output_train ** 2 
         return reward.mean()
 
     def gen_loss(
@@ -243,7 +245,8 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
 
         reward = net(state, action, next_state, done)[~is_expert]
         if custom_log_policy_act_prob is not None:
-            ratio = th.exp(custom_log_policy_act_prob - log_policy_act_prob)
+            ratio = th.exp(custom_log_policy_act_prob[~is_expert] - log_policy_act_prob[~is_expert])
+            # reward = 0.5*(reward *  th.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)) + reward*0.5
             reward = reward *  th.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
         return reward.mean() 
 
@@ -378,7 +381,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["labels_expert_is_one"].long(),
+                batch["labels_expert_is_one"].bool(),
             )
             rew_gen_loss = self.gen_loss(
                 self._reward_net,
@@ -386,46 +389,50 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["labels_expert_is_one"].long(),
+                batch["labels_expert_is_one"].bool(),
                 batch["log_policy_act_prob"],
             )
-
+            
+            prim_batch = self._make_disc_train_batch(
+                gen_samples=gen_samples,
+                expert_samples=gen_samples,
+            )
             primary_expert_loss = self.expert_loss(
                 self._primary_net,
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
+                prim_batch["state"],
+                prim_batch["primary_action"],
+                prim_batch["next_state"],
+                prim_batch["done"],
+                prim_batch["labels_expert_is_one"].bool(),
             )
             primary_gen_loss = self.gen_loss(
                 self._primary_net,
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-                batch["log_policy_act_prob"],
-                batch["primary_log_policy_act_prob"],
+                prim_batch["state"],
+                prim_batch["primary_action"],
+                prim_batch["next_state"],
+                prim_batch["done"],
+                prim_batch["labels_expert_is_one"].bool(),
+                prim_batch["log_policy_act_prob"],
+                # batch["primary_log_policy_act_prob"],
             )
 
             const_expert_loss = self.expert_loss(
                 self._constraint_net,
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
+                prim_batch["state"],
+                prim_batch["const_action"],
+                prim_batch["next_state"],
+                prim_batch["done"],
+                prim_batch["labels_expert_is_one"].bool(),
             )
             const_gen_loss = self.gen_loss(
                 self._constraint_net,
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["labels_expert_is_one"].long(),
-                batch["log_policy_act_prob"],
-                batch["const_log_policy_act_prob"],
+                prim_batch["state"],
+                prim_batch["const_action"],
+                prim_batch["next_state"],
+                prim_batch["done"],
+                prim_batch["labels_expert_is_one"].bool(),
+                prim_batch["log_policy_act_prob"],
+                # batch["const_log_policy_act_prob"],
             )
             
             reg_loss =self.reg(
@@ -434,7 +441,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["labels_expert_is_one"].long(), 
+                batch["labels_expert_is_one"].bool(), 
             )
 
             reg_loss2 =self.reg(
@@ -443,7 +450,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["labels_expert_is_one"].long(), 
+                batch["labels_expert_is_one"].bool(), 
             )
 
             reg_loss3 =self.reg(
@@ -452,7 +459,7 @@ class IRD(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["labels_expert_is_one"].long(), 
+                batch["labels_expert_is_one"].bool(), 
             )
 
             primary_loss = primary_expert_loss + primary_gen_loss

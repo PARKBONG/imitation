@@ -70,7 +70,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
             num_x = 0
             for ang in np.arange(boundary_low, boundary_high, grid_size):
                 num_x += 1
-                obs = np.zeros(8)
+                obs = np.zeros(9)
                 """
                 <state type="xpos" body="goal"/>    ## 0
                 <state type="xpos" body="plate"/>   ## 1
@@ -88,11 +88,11 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
                 pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
                 
-                # obs[0] = goal
-                obs[0] = pos-goal
-                obs[4] = pos
+                obs[0] = goal
+                obs[1] = pos
+                obs[5] = pos
                 # obs[7] = np.tanh(ang)
-                obs[6] = ang
+                obs[7] = ang
                 obs_batch.append(obs)
 
                 action, _ = model.predict(obs, deterministic=True)
@@ -137,7 +137,6 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
         ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
                     * rescale, marker='*', s=100, c='r', edgecolors='k', linewidths=0.5)
         if use_wandb:
-            print(round_num)
             wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
         print(score.reshape([num_x, num_y]))
         savedir = os.path.join(log_dir,"maps")

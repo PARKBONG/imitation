@@ -135,7 +135,7 @@ def peginhole_v1():
 
 @eval_policy_ex.named_config
 def serving():
-    eval_n_timesteps = int(6.4e3)  # Min timesteps to evaluate, optional.
+    eval_n_timesteps = int(3.2e3)  # Min timesteps to evaluate, optional.
     common = dict(env_name="Serving-v0",
     max_episode_steps = 100,
     num_vec = 1  # number of environments in VecEnv)

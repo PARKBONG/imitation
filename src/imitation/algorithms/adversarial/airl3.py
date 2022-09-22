@@ -33,7 +33,7 @@ from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 
 
-class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
+class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
     """Adversarial Inverse Reinforcement Learning (`AIRL`_).
 
     .. _AIRL: https://arxiv.org/abs/1710.11248
@@ -56,7 +56,6 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
         gen_algo: base_class.BaseAlgorithm,
         reward_net: reward_nets.RewardNet,
         primary_net: reward_nets.RewardNet,
-        gt_net: reward_nets.RewardNet,
         constraint_net: reward_nets.RewardNet,
         n_disc_updates_per_round: int = 2,
         log_dir: str = "output/",
@@ -71,6 +70,7 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
         init_tensorboard_graph: bool = False,
         debug_use_ground_truth: bool = False,
         allow_variable_horizon: bool = False,
+        
     ):
         """Builds AdversarialTrainer.
         Args:
@@ -134,12 +134,12 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
         self.debug_use_ground_truth = debug_use_ground_truth
         self.venv = venv
         self.gen_algo = gen_algo
-        self._gt_net = gt_net.to(gen_algo.device)
 
         self._primary_net = primary_net.to(gen_algo.device)
         self._constraint_net = constraint_net.to(gen_algo.device)
-        self._reward_net =lambda *args: self._constraint_net(*args) - self._primary_net(*args).detach() 
-        reward_fn = lambda *args: self.constraint_train.predict_processed(*args)# + self._gt_net.predict_processed(*args)
+        # self._constraint_net =lambda *args: self._reward_net(*args) - self._primary_net(*args)#.detach() 
+        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args)#.detach() 
+        # self._reward_net = reward_net.to(gen_algo.device)
 
         self._log_dir = log_dir
 
@@ -186,11 +186,11 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
             venv = self.venv_wrapped = reward_wrapper.PrimaryConstRewardVecEnvWrapper(
                 venv,
                 # reward_fn=self.reward_train.predict_processed,
-                reward_fn= reward_fn,
+                reward_fn= lambda *args:  self.primary_train.predict_processed(*args) +self.constraint_train.predict_processed (*args),
                 # primary_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 *self.constraint_train.predict_processed(*args),
-                constraint_fn= lambda *args: 1.0 * self.constraint_train.predict_processed(*args), #- 1.0 * self.primary_train.predict_processed(*args),
-                primary_fn=self._gt_net.predict_processed,
-                # constraint_fn=self.constraint_train.predict_processed,
+                # constraint_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
+                primary_fn=self.primary_train.predict_processed,
+                constraint_fn=self.constraint_train.predict_processed,
             )
             self.gen_callback = self.venv_wrapped.make_log_callback()
         self.venv_train = self.venv_wrapped
@@ -233,7 +233,6 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
         next_state: th.Tensor,
         done: th.Tensor,
         log_policy_act_prob: th.Tensor,
-        primary_log_policy_act_prob:th.Tensor,
     ) -> th.Tensor:
         r"""Compute the discriminator's logits for each state-action sample.
         In Fu's AIRL paper (https://arxiv.org/pdf/1710.11248.pdf), the
@@ -268,11 +267,10 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
             )
         #reward_output_train = self._reward_net(state, action, next_state, done)
 
-        primary_output_train = self._constraint_net(state, action, next_state, done)
-        # primary_output_train += self._primary_net(state, action, next_state, done)
+        primary_output_train = self._reward_net(state, action, next_state, done)
         # const_output_train = self._constraint_net(state, action, next_state, done)
         # return primary_output_train + const_output_train.detach() - log_policy_act_prob
-        return primary_output_train - log_policy_act_prob #+ primary_log_policy_act_prob
+        return primary_output_train - log_policy_act_prob
 
     def primary_logits_expert_is_high(
         self,
@@ -280,16 +278,14 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
         action: th.Tensor,
         next_state: th.Tensor,
         done: th.Tensor,
-        log_policy_act_prob: th.Tensor,
-        primary_log_policy_act_prob:Optional[th.Tensor],
+        primary_log_policy_act_prob: th.Tensor,
     ) -> th.Tensor:
-        if log_policy_act_prob is None:
+        if primary_log_policy_act_prob is None:
             raise TypeError(
                 "Non-None `log_policy_act_prob` is required for this method.",
             )
         const_output_train = self._primary_net(state, action, next_state, done)
-        # const_output_train += self._primary_net(state, action, next_state, done)
-        return const_output_train - primary_log_policy_act_prob 
+        return const_output_train - primary_log_policy_act_prob
 
     @property
     def reward_train(self) -> reward_nets.RewardNet:
@@ -380,25 +376,26 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["next_state"],
                 batch["done"],
                 batch["log_policy_act_prob"],
-                batch["primary_log_policy_act_prob"],
             )
             loss = F.binary_cross_entropy_with_logits(
                 disc_logits,
                 batch["labels_expert_is_one"].float(),
             )
 
-            primary_disc_logits = self.primary_logits_expert_is_high(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["log_policy_act_prob"],
-                batch["primary_log_policy_act_prob"],
+            prim_batch = self._make_disc_train_batch(
+                gen_samples=gen_samples,
+                expert_samples=gen_samples,
             )
-
+            primary_disc_logits = self.primary_logits_expert_is_high(
+                prim_batch["state"],
+                prim_batch["primary_action"],
+                prim_batch["next_state"],
+                prim_batch["done"],
+                prim_batch["primary_log_policy_act_prob"],
+            )
             primary_loss =F.binary_cross_entropy_with_logits(
                 primary_disc_logits,
-                batch["labels_expert_is_one"].float(),
+                prim_batch["labels_expert_is_one"].float(),
             ) 
             
             loss += 1.0*primary_loss 
@@ -688,7 +685,6 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
         }
 
         return batch_dict
-
 def compute_train_stats(
     disc_logits_expert_is_high: th.Tensor,
     labels_expert_is_one: th.Tensor,

@@ -70,6 +70,7 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         init_tensorboard_graph: bool = False,
         debug_use_ground_truth: bool = False,
         allow_variable_horizon: bool = False,
+        
     ):
         """Builds AdversarialTrainer.
         Args:
@@ -136,7 +137,9 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
 
         self._primary_net = primary_net.to(gen_algo.device)
         self._constraint_net = constraint_net.to(gen_algo.device)
+        # self._constraint_net =lambda *args: self._reward_net(*args) - self._primary_net(*args)#.detach() 
         self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args)#.detach() 
+        # self._reward_net = reward_net.to(gen_algo.device)
 
         self._log_dir = log_dir
 
@@ -384,7 +387,7 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["log_policy_act_prob"],
+                batch["primary_log_policy_act_prob"],
             )
             primary_loss =F.binary_cross_entropy_with_logits(
                 primary_disc_logits,
@@ -539,15 +542,12 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         expert_samples: Optional[Mapping] = None,
     ) -> Mapping[str, th.Tensor]:
         """Build and return training batch for the next discriminator update.
-
         Args:
             gen_samples: Same as in `train_disc`.
             expert_samples: Same as in `train_disc`.
-
         Returns:
             The training batch: state, action, next state, dones, labels
             and policy log-probabilities.
-
         Raises:
             RuntimeError: Empty generator replay buffer.
             ValueError: `gen_samples` or `expert_samples` batch size is
@@ -603,6 +603,24 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         dones = np.concatenate([expert_samples["dones"], gen_samples["dones"]])
         # notice that the labels use the convention that expert samples are
         # labelled with 1 and generator samples with 0.
+
+        with th.no_grad():
+            # Convert to pytorch tensor or to TensorDict
+            obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
+            actions, values, log_probs = self.const_policy(obs_tensor)
+            actions = actions.detach().cpu().numpy()
+            assert actions.shape == gen_samples["acts"].shape
+        const_acts = np.concatenate([expert_samples["acts"], actions])
+
+
+        with th.no_grad():
+            # Convert to pytorch tensor or to TensorDict
+            obs_tensor = obs_as_tensor(gen_samples["obs"], self.gen_algo.device)
+            primary_actions, values, log_probs = self.primary_policy(obs_tensor)
+            primary_actions = primary_actions.detach().cpu().numpy()
+            assert primary_actions.shape == gen_samples["acts"].shape
+        primary_acts = np.concatenate([expert_samples["acts"], primary_actions])
+
         labels_expert_is_one = np.concatenate(
             [np.ones(n_expert, dtype=int), np.zeros(n_gen, dtype=int)],
         )
@@ -611,11 +629,23 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         with th.no_grad():
             obs_th = th.as_tensor(obs, device=self.gen_algo.device)
             acts_th = th.as_tensor(acts, device=self.gen_algo.device)
+
+            primary_acts_th = th.as_tensor(primary_acts, device=self.gen_algo.device)
+            const_acts_th = th.as_tensor(const_acts, device=self.gen_algo.device)
+
             log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th)
+            primary_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.primary_policy)
+            const_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.const_policy)
             if log_policy_act_prob is not None:
                 assert len(log_policy_act_prob) == n_samples
                 log_policy_act_prob = log_policy_act_prob.reshape((n_samples,))
-            del obs_th, acts_th  # unneeded
+            if primary_log_policy_act_prob is not None:
+                assert len(primary_log_policy_act_prob) == n_samples
+                primary_log_policy_act_prob = primary_log_policy_act_prob.reshape((n_samples,))
+            if const_log_policy_act_prob is not None:
+                assert len(const_log_policy_act_prob) == n_samples
+                const_log_policy_act_prob = const_log_policy_act_prob.reshape((n_samples,))
+            del obs_th, acts_th, primary_acts_th, const_acts_th  # unneeded
 
         obs_th, acts_th, next_obs_th, dones_th = self.primary_train.preprocess(
             obs,
@@ -623,17 +653,34 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
             next_obs,
             dones,
         )
+
+        _, primary_acts_th, _, _ = self.primary_train.preprocess(
+            obs,
+            primary_acts,
+            next_obs,
+            dones,
+        )
+        _, const_acts_th, _, _ = self.primary_train.preprocess(
+            obs,
+            const_acts,
+            next_obs,
+            dones,
+        )
+
         batch_dict = {
             "state": obs_th,
             "action": acts_th,
+            "primary_action": primary_acts_th,
+            "const_action": const_acts_th,
             "next_state": next_obs_th,
             "done": dones_th,
             "labels_expert_is_one": self._torchify_array(labels_expert_is_one),
             "log_policy_act_prob": log_policy_act_prob,
+            "primary_log_policy_act_prob": primary_log_policy_act_prob,
+            "const_log_policy_act_prob": const_log_policy_act_prob,
         }
 
         return batch_dict
-
 def compute_train_stats(
     disc_logits_expert_is_high: th.Tensor,
     labels_expert_is_one: th.Tensor,

@@ -25,13 +25,18 @@ rollout_save_path=[rollout_dir] \
 render
 
 python3 -m imitation.scripts.eval_policy with serving \
+policy_type=sac \
+policy_path=jjh_data/expert_models/serving/ \
+rollout_save_path=jjh_data/expert_models/serving/final.pkl \
+render
+python3 -m imitation.scripts.eval_policy with serving \
 policy_type=ppo \
 policy_path=jjh_data/expert_models/serving_imit/ \
 rollout_save_path=jjh_data/expert_models/serving_imit/final.pkl \
 render
 python3 -m imitation.scripts.eval_policy with serving \
-policy_type=ppo \
-policy_path=jjh_data/expert_models/serving/ \
+policy_type=sac \
+policy_path=jjh_data/expert_models/serving_mj/ \
 rollout_save_path=jjh_data/expert_models/serving/final.pkl \
 render
 ```

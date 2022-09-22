@@ -33,10 +33,11 @@ def make_env(env_id, rank, seed=0):
         env = Monitor(env)
         return env
     return _init
-
+def reward_form(s, a, ns, d):
+    return s[...,[0,1]]
 def reward_fn(s, a, ns, d):
-    return - th.abs(ns[...,0] - ns[...,1])
-combined_size  = 1
+    return 3*(th.abs(ns[...,0] - ns[...,1]) < 0.01) - 2 *(th.abs(ns[...,0]-ns[...,1]))
+combined_size  = 2
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     
@@ -90,7 +91,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'ird' + comment
-    wandb.init(project='brand_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='new_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -121,11 +122,15 @@ def main(cfg: DictConfig):
         hid_sizes=[hid_size, hid_size],
     )
     primary_net = PredefinedRewardNet(
-            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
+            venv.observation_space, venv.action_space, reward_fn=reward_form, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
+        hid_sizes=[hid_size, hid_size],)
+    primary_net = BasicRewardNet(
+        venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
         hid_sizes=[hid_size, hid_size],
+        
     )
     gt_net = FixedRewardNet(
-            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, #normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=1, use_action=True, #normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         #hid_sizes=[hid_size, hid_size],
     )
 
@@ -169,7 +174,7 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo,lambda *args: 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, env_id,log_dir,  int(round_num), "constraint", is_wandb, )
             visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(round_num), "primary", is_wandb, )
             visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(round_num), "total", is_wandb, )
     gail_trainer.train(int(total_steps), callback=cb)  

@@ -138,7 +138,7 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
 
         self._primary_net = primary_net.to(gen_algo.device)
         self._constraint_net = constraint_net.to(gen_algo.device)
-        self._reward_net =lambda *args: self._constraint_net(*args) - self._primary_net(*args).detach() 
+        self._reward_net =lambda *args: self._constraint_net(*args) #+ self._gt_net(*args).detach() 
         reward_fn = lambda *args: self.constraint_train.predict_processed(*args)# + self._gt_net.predict_processed(*args)
 
         self._log_dir = log_dir
@@ -188,9 +188,9 @@ class AIRLFIX(base.DemonstrationAlgorithm[types.Transitions]):
                 # reward_fn=self.reward_train.predict_processed,
                 reward_fn= reward_fn,
                 # primary_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 *self.constraint_train.predict_processed(*args),
-                constraint_fn= lambda *args: 1.0 * self.constraint_train.predict_processed(*args), #- 1.0 * self.primary_train.predict_processed(*args),
+                # constraint_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
                 primary_fn=self._gt_net.predict_processed,
-                # constraint_fn=self.constraint_train.predict_processed,
+                constraint_fn=self.constraint_train.predict_processed,
             )
             self.gen_callback = self.venv_wrapped.make_log_callback()
         self.venv_train = self.venv_wrapped
