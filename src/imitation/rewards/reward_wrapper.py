@@ -164,6 +164,97 @@ class RewardVecEnvWrapper(vec_env.VecEnvWrapper):
             info_dict["original_env_rew"] = old_rew
         return obs, rews, dones, infos
 
+class ConstVecEnvWrapper(vec_env.VecEnvWrapper):
+    """Uses a provided reward_fn to replace the reward function returned by `step()`.
+
+    Automatically resets the inner VecEnv upon initialization. A tricky part
+    about this class is keeping track of the most recent observation from each
+    environment.
+
+    Will also include the previous reward given by the inner VecEnv in the
+    returned info dict under the `original_env_rew` key.
+    """
+
+    def __init__(
+        self,
+        venv: vec_env.VecEnv,
+        constraint_fn: reward_function.RewardFn,
+        ep_history: int = 100,
+    ):
+        """Builds RewardVecEnvWrapper.
+
+        Args:
+            venv: The VecEnv to wrap.
+            reward_fn: A function that wraps takes in vectorized transitions
+                (obs, act, next_obs) a vector of episode timesteps, and returns a
+                vector of rewards.
+            ep_history: The number of episode rewards to retain for computing
+                mean reward.
+        """
+        assert not isinstance(venv, RewardVecEnvWrapper)
+        super().__init__(venv)
+        ## wognl0402
+        self.episode_constraints = collections.deque(maxlen=ep_history)
+        self._cumulative_const = np.zeros((venv.num_envs,))
+        self.constraint_fn = constraint_fn
+
+
+        self._old_obs = None
+        self._actions = None
+        self.reset()
+
+    def make_log_callback(self) -> WrappedRewardCallback:
+        """Creates `WrappedRewardCallback` connected to this `RewardVecEnvWrapper`."""
+        return callbacks.CallbackList([WrappedConstCallback(self.episode_constraints)])
+
+    @property
+    def envs(self):
+        return self.venv.envs
+
+    def reset(self):
+        self._old_obs = self.venv.reset()
+        return self._old_obs
+
+    def step_async(self, actions):
+        self._actions = actions
+        return self.venv.step_async(actions)
+
+    def step_wait(self):
+        obs, old_rews, dones, infos = self.venv.step_wait()
+
+        # The vecenvs automatically reset the underlying environments once they
+        # encounter a `done`, in which case the last observation corresponding to
+        # the `done` is dropped. We're going to pull it back out of the info dict!
+        obs_fixed = []
+        for single_obs, single_done, single_infos in zip(obs, dones, infos):
+            if single_done:
+                single_obs = single_infos["terminal_observation"]
+
+            obs_fixed.append(single_obs)
+        obs_fixed = np.stack(obs_fixed)
+
+        done_mask = np.asarray(dones, dtype="bool").reshape((len(dones),))
+
+        # Update statistics
+        consts = self.constraint_fn(self._old_obs, self._actions, obs_fixed, np.array(dones))
+        assert len(consts) == len(obs), "must return one const for each env"
+
+        self._cumulative_const += consts
+        for single_done, single_ep_const in zip(dones, self._cumulative_const):
+            if single_done:
+                self.episode_constraints.append(single_ep_const)
+        self._cumulative_const[done_mask] = 0
+        
+        for info, const in zip(infos, consts):
+            info["original_env_constraint"] = info.get("constraint", 0.0)
+            info["constraint"] = const
+        
+        # we can just use obs instead of obs_fixed because on the next iteration
+        # after a reset we DO want to access the first observation of the new
+        # trajectory, not the last observation of the old trajectory
+        self._old_obs = obs
+        return obs, old_rews, dones, infos
+
 class ConstRewardVecEnvWrapper(vec_env.VecEnvWrapper):
     """Uses a provided reward_fn to replace the reward function returned by `step()`.
 
@@ -260,6 +351,7 @@ class ConstRewardVecEnvWrapper(vec_env.VecEnvWrapper):
         self._cumulative_const[done_mask] = 0
         
         for info, const in zip(infos, consts):
+            info["original_env_constraint"] = info.get("constraint", 0.0)
             info["constraint"] = const
         
         # we can just use obs instead of obs_fixed because on the next iteration
@@ -384,8 +476,8 @@ class PrimaryConstRewardVecEnvWrapper(vec_env.VecEnvWrapper):
         self._cumulative_const[done_mask] = 0
         
         for info, const in zip(infos, consts):
+            info["original_env_constraint"] = info.get("constraint", 0.0)
             info["constraint"] = const
-        
         # we can just use obs instead of obs_fixed because on the next iteration
         # after a reset we DO want to access the first observation of the new
         # trajectory, not the last observation of the old trajectory
