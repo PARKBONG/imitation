@@ -36,7 +36,7 @@ def make_env(env_id, rank, seed=0):
 def reward_form(s, a, ns, d):
     return s[...,[0,1]]
 def reward_fn(s, a, ns, d):
-    return 3*(th.abs(ns[...,0] - ns[...,1]) < 0.01) - 2 *(th.abs(ns[...,0]-ns[...,1]))
+    return 5*(th.abs(ns[...,0] - ns[...,1]) < 0.01) - 0.1 *(th.abs(ns[...,0]-ns[...,1]))
 combined_size  = 2
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):

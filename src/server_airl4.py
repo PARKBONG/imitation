@@ -15,37 +15,12 @@ from imitation.util import util
 import torch as th
 import time
 
-from imitation.algorithms.adversarial.airl3 import AIRL3 
+from imitation.algorithms.adversarial.airl4 import AIRL4
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
-from util import visualize_reward, save, visualize_reward_gt
+from util import visualize_reward, save, visualize_reward_gt, plot_reward
 
-from torch.nn import functional as F
-from imitation.rewards import reward_nets
-
-class SigmoidRewardNet(reward_nets.RewardNet):
-    def __init__(self, base: reward_nets.RewardNet):
-        """Builds LogSigmoidRewardNet to wrap `reward_net`."""
-        # TODO(adam): make an explicit RewardNetWrapper class?
-        super().__init__(
-            observation_space=base.observation_space,
-            action_space=base.action_space,
-            normalize_images=base.normalize_images,
-        )
-        self.base = base
-        self.scaler = th.nn.Parameter(th.tensor(0.0, requires_grad=True),requires_grad=True)
-
-    def forward(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-    ) -> th.Tensor:
-        logits = self.base.forward(state, action, next_state, done)
-        return F.sigmoid(logits) * self.scaler * 1000
-    
 def load_rollouts(dir):
     with open(dir, 'rb') as f:
         rollouts = types.load(f)
@@ -60,8 +35,8 @@ def make_env(env_id, rank, seed=0):
     return _init
 
 def reward_fn(s, a, ns, d):
-    return s[...,[0,1]]    
-combined_size  = 2
+    return s[...,[0,1,2,3,4]]    
+combined_size  = 5
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     
@@ -95,7 +70,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-fixture","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_mj","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -115,7 +90,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'ird' + comment
-    wandb.init(project='test_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='test_bench', sync_tensorboard=True,entity='wognl0402', dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -133,7 +108,7 @@ def main(cfg: DictConfig):
         target_kl=target_kl,
         n_epochs=n_epochs,
         n_steps=n_steps,
-        policy_kwargs={'optimizer_class':th.optim.Adam},
+        policy_kwargs={'optimizer_class':th.optim.Adam, },#'net_arch':[64,64]},
         tensorboard_log='./logs/',
         device=device,
     )
@@ -149,14 +124,10 @@ def main(cfg: DictConfig):
             venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],
     )
-    
-    # reward_net = SigmoidRewardNet(reward_net)
-    # reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
-    # constraint_net = SigmoidRewardNet(constraint_net)
-    # primary_net = SigmoidRewardNet(primary_net)
-    # constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
-    # primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
-    gail_trainer = AIRL3(
+    reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
+    constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
+    primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
+    gail_trainer = AIRL4(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -192,12 +163,10 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args)), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_train(*args)), 
-                             env_id,log_dir,  int(round_num), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
-                             env_id,log_dir,  int(round_num), "total", is_wandb, )
-            
+            # plot_reward(gail_trainer.gen_algo,lambda *args: 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args), eval_env, log_dir,  int(round_num), "constraint_rand", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo,lambda *args: 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(round_num), "primary", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(round_num), "total", is_wandb, )
     gail_trainer.train(int(total_steps), callback=cb)  
     
 

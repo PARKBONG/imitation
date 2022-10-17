@@ -2,6 +2,7 @@ from imitation.algorithms.adversarial.ird import IRD
 from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
 from imitation.util.networks import RunningNorm
 from sb3_contrib import PPO2
+from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.ppo import MlpPolicy 
@@ -15,7 +16,7 @@ from imitation.util import util
 import torch as th
 import time
 
-from imitation.algorithms.adversarial.airl3 import AIRL3 
+from imitation.algorithms.adversarial.airl import AIRL
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
@@ -124,7 +125,7 @@ def main(cfg: DictConfig):
     )
     #venv = DummyVecEnv([lambda: gym.make("Gripper-v0")] * 4)
     venv = SubprocVecEnv( [make_env(env_id, i) for i in range(n_envs)])
-    learner = PPO2(
+    learner = PPO(
         env=venv,
         policy=MlpPolicy,
         batch_size=batch_size,
@@ -151,12 +152,12 @@ def main(cfg: DictConfig):
     )
     
     # reward_net = SigmoidRewardNet(reward_net)
-    # reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
+    reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
     # constraint_net = SigmoidRewardNet(constraint_net)
     # primary_net = SigmoidRewardNet(primary_net)
     # constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
     # primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
-    gail_trainer = AIRL3(
+    gail_trainer = AIRL(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -166,8 +167,6 @@ def main(cfg: DictConfig):
         reward_net=reward_net,
         disc_opt_kwargs={"lr":disc_lr},
         log_dir=log_dir,
-        primary_net=primary_net,
-        constraint_net=constraint_net,
         disc_opt_cls=opt_cls[rew_opt],
         # primary_disc_opt_cls=opt_cls[primary_opt],
         # primary_disc_opt_kwargs={"lr":disc_lr},
@@ -192,10 +191,7 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args)), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_train(*args)), 
-                             env_id,log_dir,  int(round_num), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args),
                              env_id,log_dir,  int(round_num), "total", is_wandb, )
             
     gail_trainer.train(int(total_steps), callback=cb)  

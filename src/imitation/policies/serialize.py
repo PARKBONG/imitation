@@ -99,6 +99,8 @@ def _add_stable_baselines_policies(classes):
 
 STABLE_BASELINES_CLASSES = {
     "ppo": "stable_baselines3:PPO",
+    "ppo_custom": "sb3_contrib:PPO",
+    "ppo_lag": "sb3_contrib:PPOLag",
     "sac": "stable_baselines3:SAC",
     "sac_custom": "sb3_contrib:SAC",
     "sac_lag": "sb3_contrib:SACLagrangian",

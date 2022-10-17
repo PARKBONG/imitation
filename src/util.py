@@ -7,6 +7,8 @@ from imitation.policies import serialize
 from scipy import ndimage
 import numpy as np
 import wandb
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 def save(trainer, save_path):
     """Save discriminator and generator."""
@@ -20,19 +22,21 @@ def save(trainer, save_path):
     if hasattr(trainer, "primary_train"):
         saving_net_train = trainer.primary_train
         saving_net_test = trainer.primary_test
-        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
+        while isinstance(saving_net_train, RewardNetWrapper) or hasattr(saving_net_train, "base"):
             saving_net_train = saving_net_train.base
-        while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
+        while isinstance(saving_net_test, RewardNetWrapper) or hasattr(saving_net_test, "base"):
             saving_net_test = saving_net_test.base
         th.save(saving_net_train.mlp, os.path.join(save_path, "primary_train.pt"))
         th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
 
     if hasattr(trainer, "constraint_train") and isinstance(trainer._constraint_net, RewardNet):
+        th.save(trainer.constraint_train, os.path.join(save_path, "constraint_full.pt"))
+        th.save(trainer._running_norm, os.path.join(save_path, "constraint_norm.pt"))
         saving_net_train = trainer.constraint_train
         saving_net_test = trainer.constraint_test
-        while isinstance(saving_net_train, RewardNetWrapper) and hasattr(saving_net_train, "base"):
+        while isinstance(saving_net_train, RewardNetWrapper) or hasattr(saving_net_train, "base"):
             saving_net_train = saving_net_train.base
-        while isinstance(saving_net_test, RewardNetWrapper) and hasattr(saving_net_test, "base"):
+        while isinstance(saving_net_test, RewardNetWrapper) or hasattr(saving_net_test, "base"):
             saving_net_test = saving_net_test.base
         th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_test.pt"))
         th.save(saving_net_test.mlp, os.path.join(save_path, "constraint_train.pt"))
@@ -40,6 +44,54 @@ def save(trainer, save_path):
         os.path.join(save_path, "gen_policy"),
         trainer.gen_algo,
     )
+
+def plot_reward(model, reward_net, env, log_dir, round_num, tag='', use_wandb=False, sa_pair=None):
+    observation_space = env.observation_space.shape[-1]
+    print(observation_space)
+    plot_grid = (observation_space//5 + 1, 5)
+    
+    obs_batch = sa_pair[0]
+    # obs_action = sa_pair[1]
+    next_obs_batch = sa_pair[0]
+    goal=0
+    action, _ = model.predict(obs_batch, deterministic=True)
+    obs_action = np.array(action)
+
+    # Get sqil reward
+    with th.no_grad():
+        state = th.FloatTensor(obs_batch).to(model.device)
+        action = th.FloatTensor(obs_action).to(model.device)
+        next_state = th.FloatTensor(next_obs_batch).to(model.device)
+
+    done = th.zeros_like(state[...,-1:])
+    
+    with th.no_grad():
+        irl_reward = reward_net(state, action, next_state, done)
+
+        irl_reward = irl_reward.cpu().numpy()
+    score = irl_reward
+
+    for ob in range(observation_space):
+        ax = plt.subplot2grid(plot_grid, (ob//5, ob%5))
+        ax.scatter(obs_batch[...,ob], score, marker='o', s=2, alpha=0.5)
+        labels = [item.get_text() for item in ax.get_xticklabels()]
+        empty_string_labels = ['']*len(labels)
+        ax.set_xticklabels(empty_string_labels)
+    
+    ax = plt.subplot2grid(plot_grid, (plot_grid[0]-1, plot_grid[1]-1))
+    ax.scatter(obs_batch[...,7] - obs_batch[...,3], score, marker='o', s=1, alpha=0.5)
+    labels = [item.get_text() for item in ax.get_xticklabels()]
+    empty_string_labels = ['']*len(labels)
+    ax.set_xticklabels(empty_string_labels)
+    if use_wandb:
+        wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
+    savedir = os.path.join(log_dir,"maps")
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+    plt.savefig(savedir + '/%s_%s.png' % (goal, tag))
+    print('Save Itr', goal)
+    plt.close()
+
 def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_wandb=False, goal=1.0):
     import seaborn as sns
     import matplotlib.pyplot as plt
@@ -90,7 +142,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 
                 obs[0] = goal
                 obs[1] = pos
-                obs[5] = pos
+                # obs[5] = pos
                 # obs[7] = np.tanh(ang)
                 obs[7] = ang
                 obs_batch.append(obs)

@@ -430,7 +430,6 @@ class PredefinedRewardNet(RewardNet):
         reward_fn,
         combined_size,
         use_action = True,
-        scaler = 1.0,
         **kwargs,
     ):
         """Builds reward MLP.
@@ -446,7 +445,6 @@ class PredefinedRewardNet(RewardNet):
         """
         super().__init__(observation_space, action_space)
         combined_size = combined_size
-        self.scaler = scaler
 
         self.use_action = use_action
         if self.use_action:
@@ -483,7 +481,7 @@ class PredefinedRewardNet(RewardNet):
 
         inputs_concat = th.cat(inputs, dim=1)
 
-        outputs = self.mlp(inputs_concat) * self.scaler 
+        outputs = self.mlp(inputs_concat) 
         assert outputs.shape == state.shape[:1]
         return outputs
 
@@ -503,7 +501,6 @@ class BasicRewardNet(RewardNet):
         use_action: bool = True,
         use_next_state: bool = False,
         use_done: bool = False,
-        scaler: float = 1.0,
         **kwargs,
     ):
         """Builds reward MLP.
@@ -519,7 +516,6 @@ class BasicRewardNet(RewardNet):
         """
         super().__init__(observation_space, action_space)
         combined_size = 0
-        self.scaler = scaler
 
         self.use_state = use_state
         if self.use_state:
@@ -565,7 +561,7 @@ class BasicRewardNet(RewardNet):
 
         inputs_concat = th.cat(inputs, dim=1)
 
-        outputs = self.mlp(inputs_concat)*self.scaler
+        outputs = self.mlp(inputs_concat)
         assert outputs.shape == state.shape[:1]
 
         return outputs

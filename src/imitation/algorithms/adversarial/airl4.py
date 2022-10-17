@@ -31,9 +31,80 @@ from imitation.rewards import reward_nets
 from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
-from imitation.util.networks import RunningNorm
 
-class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
+
+class RewardNetFromDiscriminatorLogit(reward_nets.RewardNet):
+    r"""Converts the discriminator logits raw value to a reward signal.
+
+    Wrapper for reward network that takes in the logits of the discriminator
+    probability distribution and outputs the corresponding reward for the GAIL
+    algorithm.
+
+    Below is the derivation of the transformation that needs to be applied.
+
+    The GAIL paper defines the cost function of the generator as:
+
+    .. math::
+
+        \log{D}
+
+    as shown on line 5 of Algorithm 1. In the paper, :math:`D` is the probability
+    distribution learned by the discriminator, where :math:`D(X)=1` if the trajectory
+    comes from the generator, and :math:`D(X)=0` if it comes from the expert.
+    In this implementation, we have decided to use the opposite convention that
+    :math:`D(X)=0` if the trajectory comes from the generator,
+    and :math:`D(X)=1` if it comes from the expert. Therefore, the resulting cost
+    function is:
+
+    .. math::
+
+        \log{(1-D)}
+
+    Since our algorithm trains using a reward function instead of a loss function, we
+    need to invert the sign to get:
+
+    .. math::
+
+        R=-\log{(1-D)}=\log{\frac{1}{1-D}}
+
+    Now, let :math:`L` be the output of our reward net, which gives us the logits of D
+    (:math:`L=\operatorname{logit}{D}`). We can write:
+
+    .. math::
+
+        D=\operatorname{sigmoid}{L}=\frac{1}{1+e^{-L}}
+
+    Since :math:`1-\operatorname{sigmoid}{(L)}` is the same as
+    :math:`\operatorname{sigmoid}{(-L)}`, we can write:
+
+    .. math::
+
+        R=-\log{\operatorname{sigmoid}{(-L)}}
+
+    which is a non-decreasing map from the logits of D to the reward.
+    """
+
+    def __init__(self, base: reward_nets.RewardNet):
+        """Builds LogSigmoidRewardNet to wrap `reward_net`."""
+        # TODO(adam): make an explicit RewardNetWrapper class?
+        super().__init__(
+            observation_space=base.observation_space,
+            action_space=base.action_space,
+            normalize_images=base.normalize_images,
+        )
+        self.base = base
+
+    def forward(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+    ) -> th.Tensor:
+        logits = self.base.forward(state, action, next_state, done)
+        return th.exp(logits)*logits#-F.logsigmoid(-logits)
+
+class AIRL4(base.DemonstrationAlgorithm[types.Transitions]):
     """Adversarial Inverse Reinforcement Learning (`AIRL`_).
 
     .. _AIRL: https://arxiv.org/abs/1710.11248
@@ -138,11 +209,12 @@ class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
         self._primary_net = primary_net.to(gen_algo.device)
         self._constraint_net = constraint_net.to(gen_algo.device)
         # self._constraint_net =lambda *args: self._reward_net(*args) - self._primary_net(*args)#.detach() 
-        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args).detach() 
-        self._running_norm = RunningNorm(1).to(gen_algo.device)
-        
+        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args)#.detach() 
         # self._reward_net = reward_net.to(gen_algo.device)
 
+        self._primary_processed = RewardNetFromDiscriminatorLogit(primary_net)
+        self._constraint_processed = RewardNetFromDiscriminatorLogit(constraint_net)
+        # self._primary_processed = RewardNetFromDiscriminatorLogit(primary_net)
         self._log_dir = log_dir
 
         # Create graph for optimising/recording stats on discriminator
@@ -188,11 +260,11 @@ class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
             venv = self.venv_wrapped = reward_wrapper.PrimaryConstRewardVecEnvWrapper(
                 venv,
                 # reward_fn=self.reward_train.predict_processed,
-                reward_fn= lambda *args:  self.update_stats( self.primary_train.predict_processed(*args) +self.constraint_train.predict_processed (*args) , update_stats=True),
+                reward_fn= lambda *args:  self.primary_train.predict_processed(*args) +self.constraint_train.predict_processed (*args),
                 # primary_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 *self.constraint_train.predict_processed(*args),
                 # constraint_fn= lambda *args: 1.0 * self.reward_train.predict_processed(*args) - 1.0 * self.primary_train.predict_processed(*args),
-                primary_fn= lambda *args: self.update_stats( self.primary_train.predict_processed(*args), update_stats=False),
-                constraint_fn= lambda *args: self.update_stats( self.constraint_train.predict_processed(*args), update_stats=False),
+                primary_fn=self.primary_train.predict_processed,
+                constraint_fn=self.constraint_train.predict_processed,
             )
             self.gen_callback = self.venv_wrapped.make_log_callback()
         self.venv_train = self.venv_wrapped
@@ -215,20 +287,6 @@ class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
             gen_replay_buffer_capacity,
             self.venv,
         )
-        
-    def update_stats(self, outputs, update_stats=False):
-        
-        rew_th = th.tensor(
-            outputs,
-            device=self.gen_algo.device,
-        )
-        rew = self._running_norm(rew_th).detach().cpu().numpy().flatten()
-        # outputs = self._running_norm(outputs)
-        
-        if update_stats:
-            with th.no_grad():
-                self._running_norm.update_stats(rew_th)
-        return rew
 
     @property
     def policy(self) -> policies.BasePolicy:
@@ -286,7 +344,7 @@ class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
         primary_output_train = self._reward_net(state, action, next_state, done)
         # const_output_train = self._constraint_net(state, action, next_state, done)
         # return primary_output_train + const_output_train.detach() - log_policy_act_prob
-        return primary_output_train - log_policy_act_prob
+        return primary_output_train/2# - log_policy_act_prob
 
     def primary_logits_expert_is_high(
         self,
@@ -301,7 +359,7 @@ class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
                 "Non-None `log_policy_act_prob` is required for this method.",
             )
         const_output_train = self._primary_net(state, action, next_state, done)
-        return const_output_train - primary_log_policy_act_prob
+        return const_output_train# - primary_log_policy_act_prob
 
     @property
     def reward_train(self) -> reward_nets.RewardNet:
@@ -318,12 +376,12 @@ class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
 
     @property
     def constraint_train(self) -> reward_nets.RewardNet:
-        return self._constraint_net
+        return self._constraint_processed
 
     @property
     def constraint_test (self) -> reward_nets.RewardNet:
         """Returns the unshaped version of reward network used for testing."""
-        reward_net = self._constraint_net
+        reward_net = self._constraint_processed
         # Recursively return the base network of the wrapped reward net
         while isinstance(reward_net, reward_nets.RewardNetWrapper):
             reward_net = reward_net.base
@@ -331,12 +389,12 @@ class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
 
     @property
     def primary_train(self) -> reward_nets.RewardNet:
-        return self._primary_net
+        return self._primary_processed
 
     @property
     def primary_test (self) -> reward_nets.RewardNet:
         """Returns the unshaped version of reward network used for testing."""
-        reward_net = self._primary_net
+        reward_net = self._primary_processed
         # Recursively return the base network of the wrapped reward net
         while isinstance(reward_net, reward_nets.RewardNetWrapper):
             reward_net = reward_net.base
@@ -398,16 +456,20 @@ class AIRL3(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["labels_expert_is_one"].float(),
             )
 
+            prim_batch = self._make_disc_train_batch(
+                gen_samples=gen_samples,
+                expert_samples=gen_samples,
+            )
             primary_disc_logits = self.primary_logits_expert_is_high(
-                batch["state"],
-                batch["action"],
-                batch["next_state"],
-                batch["done"],
-                batch["primary_log_policy_act_prob"],
+                prim_batch["state"],
+                prim_batch["primary_action"],
+                prim_batch["next_state"],
+                prim_batch["done"],
+                prim_batch["primary_log_policy_act_prob"],
             )
             primary_loss =F.binary_cross_entropy_with_logits(
                 primary_disc_logits,
-                batch["labels_expert_is_one"].float(),
+                prim_batch["labels_expert_is_one"].float(),
             ) 
             
             loss += 1.0*primary_loss 

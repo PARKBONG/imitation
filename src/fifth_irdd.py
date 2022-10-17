@@ -90,7 +90,7 @@ r_batch = []
 for _ in range(10):
     a = time.time()
     
-    for i in range(50):
+    for i in range(1000):
         action, _states = model.predict(old_obs, deterministic=False)
 
         obs, rewards, dones, _= eval_env.step(action)
