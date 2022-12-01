@@ -25,6 +25,7 @@ rollout_save_path=[rollout_dir] \
 render
 
 python3 -m imitation.scripts.eval_policy with half_cheetah \
+<<<<<<< Updated upstream
 policy_type=ppo_lag \
 policy_path=jjh_data/expert_models/cheetah/ \
 rollout_save_path=jjh_data/expert_models/cheetah/final.pkl \
@@ -36,6 +37,13 @@ policy_path=jjh_data/expert_models/serving-fixture/ \
 rollout_save_path=jjh_data/expert_models/serving-fixture/final.pkl \
 render
 
+python3 -m imitation.scripts.eval_policy with half_cheetah \
+=======
+>>>>>>> Stashed changes
+policy_type=sac_lag \
+policy_path=jjh_data/expert_models/cheetah/ \
+rollout_save_path=jjh_data/expert_models/cheetah/final.pkl \
+render
 python3 -m imitation.scripts.eval_policy with serving \
 policy_type=sac \
 policy_path=jjh_data/expert_models/serving/ \

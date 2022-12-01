@@ -386,7 +386,7 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["primary_log_policy_act_prob"],
+                batch["log_policy_act_prob"],
             )
             primary_loss =F.binary_cross_entropy_with_logits(
                 primary_disc_logits,

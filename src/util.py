@@ -22,33 +22,54 @@ def save(trainer, save_path):
     if hasattr(trainer, "primary_train"):
         saving_net_train = trainer.primary_train
         saving_net_test = trainer.primary_test
+<<<<<<< Updated upstream
+=======
+        th.save(saving_net_train, os.path.join(save_path, "primary_train_full.pt"))
+>>>>>>> Stashed changes
         while isinstance(saving_net_train, RewardNetWrapper) or hasattr(saving_net_train, "base"):
             saving_net_train = saving_net_train.base
         while isinstance(saving_net_test, RewardNetWrapper) or hasattr(saving_net_test, "base"):
             saving_net_test = saving_net_test.base
-        th.save(saving_net_train.mlp, os.path.join(save_path, "primary_train.pt"))
-        th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
 
+        if hasattr(saving_net_train, "mlp"):
+            th.save(saving_net_train.mlp, os.path.join(save_path, "primary_train.pt"))
+            th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
+        else:
+            th.save(saving_net_train, os.path.join(save_path, "primary_train.pt"))
+            th.save(saving_net_test, os.path.join(save_path, "primary_test.pt"))
     if hasattr(trainer, "constraint_train") and isinstance(trainer._constraint_net, RewardNet):
         th.save(trainer.constraint_train, os.path.join(save_path, "constraint_full.pt"))
         th.save(trainer._running_norm, os.path.join(save_path, "constraint_norm.pt"))
         saving_net_train = trainer.constraint_train
+        th.save(saving_net_train, os.path.join(save_path, "constraint_train_full.pt"))
         saving_net_test = trainer.constraint_test
         while isinstance(saving_net_train, RewardNetWrapper) or hasattr(saving_net_train, "base"):
             saving_net_train = saving_net_train.base
         while isinstance(saving_net_test, RewardNetWrapper) or hasattr(saving_net_test, "base"):
             saving_net_test = saving_net_test.base
-        th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_test.pt"))
-        th.save(saving_net_test.mlp, os.path.join(save_path, "constraint_train.pt"))
+        if hasattr(saving_net_train, "mlp"):
+            th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_train.pt"))
+            th.save(saving_net_test.mlp, os.path.join(save_path, "constraint_test.pt"))
+        else:
+            th.save(saving_net_train, os.path.join(save_path, "constraint_train.pt"))
+            th.save(saving_net_test, os.path.join(save_path, "constraint_test.pt"))
     serialize.save_stable_model(
         os.path.join(save_path, "gen_policy"),
         trainer.gen_algo,
     )
 
+<<<<<<< Updated upstream
+=======
+def get_cmap(n, name='hsv'):
+    '''Returns a function that maps each index in 0, 1, ..., n-1 to a distinct 
+    RGB color; the keyword argument name must be a standard mpl colormap name.'''
+    return plt.cm.get_cmap(name, n)
+>>>>>>> Stashed changes
 def plot_reward(model, reward_net, env, log_dir, round_num, tag='', use_wandb=False, sa_pair=None):
     observation_space = env.observation_space.shape[-1]
     print(observation_space)
     plot_grid = (observation_space//5 + 1, 5)
+<<<<<<< Updated upstream
     
     obs_batch = sa_pair[0]
     # obs_action = sa_pair[1]
@@ -83,6 +104,55 @@ def plot_reward(model, reward_net, env, log_dir, round_num, tag='', use_wandb=Fa
     labels = [item.get_text() for item in ax.get_xticklabels()]
     empty_string_labels = ['']*len(labels)
     ax.set_xticklabels(empty_string_labels)
+=======
+   
+    fig = plt.gcf()
+    fig.set_size_inches(18.5, 10.5) 
+    obs_batch = sa_pair[0]
+
+    action, _ = model.predict(obs_batch, deterministic=True)
+    obs_action = np.array(action)
+    obs_action = sa_pair[1]
+    next_obs_batch = sa_pair[2]
+    goal=0
+
+    # Get sqil reward
+    # with th.no_grad():
+    #     state = th.FloatTensor(obs_batch).to(model.device)
+    #     action = th.FloatTensor(obs_action).to(model.device)
+    #     next_state = th.FloatTensor(next_obs_batch).to(model.device)
+    # with th.no_grad():
+    #     irl_reward = reward_net(state, action, next_state, done)
+
+    #     irl_reward = irl_reward.cpu().numpy()
+    state = obs_batch
+    action = obs_action
+    next_state = next_obs_batch
+    done = np.zeros_like(state[...,-1:])
+    irl_reward = reward_net(state, action, next_state, done)
+    
+    score = irl_reward
+
+    from itertools import cycle
+    for ob in range(observation_space):
+        cycol = cycle('bgrcmykw')
+        ax = plt.subplot2grid(plot_grid, (ob//5, ob%5))
+        cmap = get_cmap(len(next_obs_batch)//1000 + 1)
+        for i in range(len(next_obs_batch)//1000):
+
+            ax.scatter(next_obs_batch[i*1000: (i+1)*1000,ob], score[i*1000: (i+1)*1000], c=next(cycol), marker='o', s=1, alpha=0.1)
+        # labels = [item.get_text() for item in ax.get_xticklabels()]
+        # empty_string_labels = ['']*len(labels)
+        # ax.set_xticklabels(empty_string_labels)
+   
+    ax = plt.subplot2grid(plot_grid, (observation_space//5, observation_space%5))
+    cycol = cycle('bgrcmykw')
+    cmap = get_cmap(len(next_obs_batch)//1000 + 1)
+    for i in range(len(next_obs_batch)//1000):
+
+        ax.scatter(np.max(np.abs(next_obs_batch[i*1000: (i+1)*1000,10:]),axis=-1), score[i*1000: (i+1)*1000], c=next(cycol), marker='o', s=1, alpha=0.1)
+    # labels = [item.get_text() for item in ax.get_xticklabels()] 
+>>>>>>> Stashed changes
     if use_wandb:
         wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
     savedir = os.path.join(log_dir,"maps")
@@ -158,17 +228,21 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
         obs_action = np.array(obs_action)
 
         # Get sqil reward
+        """
         with th.no_grad():
             state = th.FloatTensor(obs_batch).to(model.device)
             action = th.FloatTensor(obs_action).to(model.device)
             next_state = th.FloatTensor(next_obs_batch).to(model.device)
 
         done = th.zeros_like(state[...,-1:])
+        """
+        state = obs_batch
+        action = obs_action
+        next_state =next_obs_batch
 
-        with th.no_grad():
-            irl_reward = reward_net(state, action, next_state, done)
+        done = np.zeros_like(state[...,-1:])
 
-            irl_reward = irl_reward.cpu().numpy()
+        irl_reward = reward_net(state, action, next_state, done)
         score = irl_reward
 
         score = irl_reward
