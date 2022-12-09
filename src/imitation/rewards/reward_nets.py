@@ -364,7 +364,7 @@ class ScaledRewardNet(RewardNet):
         outputs = reward_form * self.scale + self.bias
         assert outputs.shape == state.shape[:1]
 
-        return outputs * 10.0
+        return outputs * 100.0
 
 class FixedRewardNet(RewardNet):
     """MLP that takes as input the state, action, next state and done flag.

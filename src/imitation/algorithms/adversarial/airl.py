@@ -1,5 +1,25 @@
 """Adversarial Inverse Reinforcement Learning (AIRL)."""
 
+import abc
+import collections
+import dataclasses
+import logging
+import os
+from typing import Callable, Mapping, Optional, Sequence, Tuple, Type
+
+import numpy as np
+import torch as th
+import torch.utils.tensorboard as thboard
+import tqdm
+from stable_baselines3.common import base_class, policies, vec_env
+from stable_baselines3.sac import policies as sac_policies
+from torch.nn import functional as F
+
+from imitation.algorithms import base
+from imitation.data import buffer, rollout, types, wrappers
+from imitation.rewards import reward_nets, reward_wrapper
+from imitation.util import logger, networks, util
+
 import torch as th
 from stable_baselines3.common import base_class, policies, vec_env
 from stable_baselines3.sac import policies as sac_policies
@@ -8,8 +28,9 @@ from imitation.algorithms import base
 from imitation.algorithms.adversarial import common
 from imitation.rewards import reward_nets
 
-STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
+from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 
+STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 
 class AIRL(common.AdversarialTrainer):
     """Adversarial Inverse Reinforcement Learning (`AIRL`_).
@@ -129,3 +150,107 @@ class AIRL(common.AdversarialTrainer):
         while isinstance(reward_net, reward_nets.RewardNetWrapper):
             reward_net = reward_net.base
         return reward_net
+
+    def _make_disc_train_batch(
+        self,
+        *,
+        gen_samples: Optional[Mapping] = None,
+        expert_samples: Optional[Mapping] = None,
+    ) -> Mapping[str, th.Tensor]:
+        """Build and return training batch for the next discriminator update.
+
+        Args:
+            gen_samples: Same as in `train_disc`.
+            expert_samples: Same as in `train_disc`.
+
+        Returns:
+            The training batch: state, action, next state, dones, labels
+            and policy log-probabilities.
+
+        Raises:
+            RuntimeError: Empty generator replay buffer.
+            ValueError: `gen_samples` or `expert_samples` batch size is
+                different from `self.demo_batch_size`.
+        """
+        if expert_samples is None:
+            expert_samples = self._next_expert_batch()
+
+        if gen_samples is None:
+            if self._gen_replay_buffer.size() == 0:
+                raise RuntimeError(
+                    "No generator samples for training. " "Call `train_gen()` first.",
+                )
+            gen_samples = self._gen_replay_buffer.sample(self.demo_batch_size)
+            gen_samples = types.dataclass_quick_asdict(gen_samples)
+
+        n_gen = len(gen_samples["obs"])
+        n_expert = len(expert_samples["obs"])
+        if not (n_gen == n_expert == self.demo_batch_size):
+            raise ValueError(
+                "Need to have exactly self.demo_batch_size number of expert and "
+                "generator samples, each. "
+                f"(n_gen={n_gen} n_expert={n_expert} "
+                f"demo_batch_size={self.demo_batch_size})",
+            )
+
+        # Guarantee that Mapping arguments are in mutable form.
+        expert_samples = dict(expert_samples)
+        gen_samples = dict(gen_samples)
+
+        # Convert applicable Tensor values to NumPy.
+        for field in dataclasses.fields(types.Transitions):
+            k = field.name
+            if k == "infos":
+                continue
+            for d in [gen_samples, expert_samples]:
+                if isinstance(d[k], th.Tensor):
+                    d[k] = d[k].detach().numpy()
+        assert isinstance(gen_samples["obs"], np.ndarray)
+        assert isinstance(expert_samples["obs"], np.ndarray)
+
+        # Check dimensions.
+        n_samples = n_expert + n_gen
+        assert n_expert == len(expert_samples["acts"])
+        assert n_expert == len(expert_samples["next_obs"])
+        assert n_gen == len(gen_samples["acts"])
+        assert n_gen == len(gen_samples["next_obs"])
+
+        # Concatenate rollouts, and label each row as expert or generator.
+        obs = np.concatenate([expert_samples["obs"], gen_samples["obs"]])
+        acts = np.concatenate([expert_samples["acts"], gen_samples["acts"]])
+        next_obs = np.concatenate([expert_samples["next_obs"], gen_samples["next_obs"]])
+        dones = np.concatenate([expert_samples["dones"], gen_samples["dones"]])
+        # notice that the labels use the convention that expert samples are
+        # labelled with 1 and generator samples with 0.
+        labels_expert_is_one = np.concatenate(
+            [np.ones(n_expert, dtype=int), np.zeros(n_gen, dtype=int)],
+        )
+
+        # Calculate generator-policy log probabilities.
+        with th.no_grad():
+            obs_th = th.as_tensor(obs, device=self.gen_algo.device)
+            acts_th = th.as_tensor(acts, device=self.gen_algo.device)
+            # acts_th = acts_th.detach().cpu()
+            # obs_th = obs_th.detach().cpu()
+            log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th)
+            if log_policy_act_prob is not None:
+                assert len(log_policy_act_prob) == n_samples
+                log_policy_act_prob = log_policy_act_prob.reshape((n_samples,))
+            del obs_th, acts_th  # unneeded
+
+        obs_th, acts_th, next_obs_th, dones_th = self.reward_train.preprocess(
+            obs,
+            acts,
+            next_obs,
+            dones,
+        )
+        batch_dict = {
+            "state": obs_th,
+            "action": acts_th,
+            "next_state": next_obs_th,
+            "done": dones_th,
+            "labels_expert_is_one": self._torchify_array(labels_expert_is_one),
+            "log_policy_act_prob": log_policy_act_prob,
+        }
+
+        return batch_dict

@@ -461,6 +461,7 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
             gen_algo_actor = self.policy.actor
             assert gen_algo_actor is not None
             # generate log_policy_act_prob from SAC actor.
+            # print(gen_algo_actor.device)
             mean_actions, log_std, _ = gen_algo_actor.get_action_dist_params(obs_th)
             distribution = gen_algo_actor.action_dist.proba_distribution(
                 mean_actions,
@@ -470,7 +471,13 @@ class AdversarialTrainer(base.DemonstrationAlgorithm[types.Transitions]):
             # `acts_th` need to be scaled accordingly before computing log prob.
             # Scale actions only if the policy squashes outputs.
             assert self.policy.squash_output
+            acts_th = acts_th.detach().cpu()
             scaled_acts_th = self.policy.scale_action(acts_th)
+            acts_th = acts_th.to(gen_algo_actor.device)
+
+            # scaled_acts_th = scaled_acts_th.detach().cpu()
+            scaled_acts_th = scaled_acts_th.to(gen_algo_actor.device)
+            # distribution = distribution.cpu()
             log_policy_act_prob_th = distribution.log_prob(scaled_acts_th)
         else:
             return None

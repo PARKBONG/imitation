@@ -1,10 +1,11 @@
 from imitation.algorithms.adversarial.ird import IRD 
 from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
 from imitation.util.networks import RunningNorm
-from sb3_contrib import PPO2
+from sb3_contrib import PPO2, SACLagrangian
+from stable_baselines3 import SAC
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.ppo import MlpPolicy 
+from stable_baselines3.sac import MlpPolicy 
 import gym
 from imitation.data import types
 import wandb
@@ -14,38 +15,18 @@ import sys
 from imitation.util import util
 import torch as th
 import time
-
-from imitation.algorithms.adversarial.airl3 import AIRL3 
+from sb3_contrib.common.monitor import ConstMonitor
+from stable_baselines3.common.utils import safe_mean, should_collect_more_steps
+from imitation.algorithms.adversarial.airl import AIRL
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
-from util import visualize_reward, save, visualize_reward_gt
+from util import visualize_reward, save, visualize_reward_gt, plot_reward
+import numpy as np
+import imitation
+import matplotlib.pyplot as plt
 
-from torch.nn import functional as F
-from imitation.rewards import reward_nets
-
-class SigmoidRewardNet(reward_nets.RewardNet):
-    def __init__(self, base: reward_nets.RewardNet):
-        """Builds LogSigmoidRewardNet to wrap `reward_net`."""
-        # TODO(adam): make an explicit RewardNetWrapper class?
-        super().__init__(
-            observation_space=base.observation_space,
-            action_space=base.action_space,
-            normalize_images=base.normalize_images,
-        )
-        self.base = base
-        self.scaler = th.nn.Parameter(th.tensor(0.0, requires_grad=True),requires_grad=True)
-
-    def forward(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-    ) -> th.Tensor:
-        logits = self.base.forward(state, action, next_state, done)
-        return F.sigmoid(logits) * self.scaler * 1000
-    
+from imitation.policies import base
 def load_rollouts(dir):
     with open(dir, 'rb') as f:
         rollouts = types.load(f)
@@ -55,13 +36,13 @@ def make_env(env_id, rank, seed=0):
     def _init():
         env = gym.make(env_id)
         env.seed(seed + rank)
-        env = Monitor(env)
+        env = ConstMonitor(env)
         return env
     return _init
 
 def reward_fn(s, a, ns, d):
-    return s[...,[0,1]]    
-combined_size  = 2
+    return s[...,[8]]    
+combined_size  = 1
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     
@@ -95,12 +76,18 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-<<<<<<< Updated upstream
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-fixture","final.pkl"))
-=======
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_mj","final.pkl"))
->>>>>>> Stashed changes
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","cheetah","final.pkl"))
     
+    NORMALIZE_RUNNING_POLICY_KWARGS = {
+        "features_extractor_class": base.NormalizeFeaturesExtractor,
+        "features_extractor_kwargs": {
+            "normalize_class": imitation.util.networks.RunningNorm,
+        },
+        'optimizer_class': th.optim.Adam,
+        'net_arch': [256,256],
+    }
+
+
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
     log_format_strs = ["stdout"]
@@ -119,7 +106,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'ird' + comment
-    wandb.init(project='test_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='test_bench', sync_tensorboard=True,entity='jesus_accept', dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -128,17 +115,20 @@ def main(cfg: DictConfig):
     )
     #venv = DummyVecEnv([lambda: gym.make("Gripper-v0")] * 4)
     venv = SubprocVecEnv( [make_env(env_id, i) for i in range(n_envs)])
-    learner = PPO2(
+    learner = SAC(
         env=venv,
         policy=MlpPolicy,
-        batch_size=batch_size,
-        ent_coef=ent_coef,
-        learning_rate=gen_lr,
-        target_kl=target_kl,
-        n_epochs=n_epochs,
-        n_steps=n_steps,
-        policy_kwargs={'optimizer_class':th.optim.Adam},
-        tensorboard_log='./logs/',
+        batch_size=16384,
+        gradient_steps=10,
+        buffer_size=int(1e5),
+        # ent_coef=ent_coef,
+        # learning_rate=gen_lr,
+        # target_kl=target_kl,
+        # n_epochs=n_epochs,
+        # n_steps=n_steps,
+        # # policy_kwargs=NORMALIZE_RUNNING_POLICY_KWARGS,#{'optimizer_class':th.optim.Adam, },#'net_arch':[64,64]},
+        # policy_kwargs={'optimizer_class':th.optim.Adam, 'net_arch':[256,256]},
+        # tensorboard_log='./logs/',
         device=device,
     )
     reward_net = BasicRewardNet(
@@ -153,14 +143,10 @@ def main(cfg: DictConfig):
             venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],
     )
-    
-    # reward_net = SigmoidRewardNet(reward_net)
-    # reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
-    # constraint_net = SigmoidRewardNet(constraint_net)
-    # primary_net = SigmoidRewardNet(primary_net)
-    # constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
-    # primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
-    gail_trainer = AIRL3(
+    reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
+    constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
+    primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
+    gail_trainer = AIRL(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -170,9 +156,8 @@ def main(cfg: DictConfig):
         reward_net=reward_net,
         disc_opt_kwargs={"lr":disc_lr},
         log_dir=log_dir,
-        primary_net=primary_net,
-        constraint_net=constraint_net,
         disc_opt_cls=opt_cls[rew_opt],
+        gen_train_timesteps=int(1e5),
         # primary_disc_opt_cls=opt_cls[primary_opt],
         # primary_disc_opt_kwargs={"lr":disc_lr},
         # const_disc_opt_cls=opt_cls[constraint_opt],
@@ -184,30 +169,11 @@ def main(cfg: DictConfig):
     if render:
         eval_env.render(mode='human')
     checkpoint_interval=10
-    visualize_reward_gt(env_id='',log_dir=log_dir)
-    
+    safe_mean_interval=3
     def cb(round_num):
-        if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:
-            save(gail_trainer, os.path.join(log_dir, "checkpoints", f"{round_num:05d}"))
-            obs = eval_env.reset()
-            for i in range(300):
-                action, _states = gail_trainer.gen_algo.predict(obs, deterministic=False)
-                obs, _, _, _= eval_env.step(action)
-                if render:
-                    eval_env.render(mode='human')
-                    time.sleep(0.005)
-<<<<<<< Updated upstream
-            visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args)), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_train(*args)), 
-                             env_id,log_dir,  int(round_num), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
-                             env_id,log_dir,  int(round_num), "total", is_wandb, )
-            
-=======
-            visualize_reward(gail_trainer.gen_algo,lambda *args: 1.0 * gail_trainer.constraint_train.predict_processed(*args) , env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train.predict_processed, env_id,log_dir,  int(round_num), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: 1.0 * gail_trainer.constraint_train.predict_processed(*args) + 1.0 * gail_trainer.primary_train.predict_processed(*args), env_id,log_dir,  int(round_num), "total", is_wandb, )
->>>>>>> Stashed changes
+        if checkpoint_interval > 0 and round_num % safe_mean_interval == 0:
+            ivc = safe_mean([ep_info["c"] for ep_info in gail_trainer.gen_algo.ep_info_buffer])
+            gail_trainer.logger.record('mean/gen/rollout/ep_const_mean', ivc)
     gail_trainer.train(int(total_steps), callback=cb)  
     
 
