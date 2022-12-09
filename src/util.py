@@ -199,6 +199,113 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
         print('Save Itr', goal)
         plt.close()
 
+def visualize_reward_panda(model, reward_net, env_id, log_dir, round_num, tag='', use_wandb=False, goal=1.0):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    grid_size = 0.1
+    rescale = 1./grid_size
+
+    cart_width = 4.0 / (12 ** 0.5)
+    cart_height = 1.0 / (12 ** 0.5)
+    plate_width = 0.5
+    plate_height = 0.2
+    pole_width = 0.15
+    pole_height = 0.8
+    anchor_height = 0.1
+    grid_size = 0.05
+    rescale= int(1/grid_size)
+    boundary_low = -2.1
+    boundary_high = 2.1
+    for goal in [-0.8, 0.8]:
+        obs_batch = []
+        obs_action = []
+        next_obs_batch = []
+        target = [0., goal]
+
+        plate_ang = 0.0
+        num_y = 0
+        for pos in np.arange(boundary_low, boundary_high, grid_size):
+            num_y += 1
+            num_x = 0
+            for ang in np.arange(boundary_low, boundary_high, grid_size):
+                num_x += 1
+                obs = np.zeros(5)
+                """
+                <state type="xpos" body="goal"/>    ## 0
+                <state type="xpos" body="plate"/>   ## 1
+                <state type="xvel" body="plate"/>   ## 2
+                <state type="apos" body="plate"/>   ## 3   
+                <state type="avel" body="plate"/>   ## 4
+                <state type="xpos" body="pole"/>    ## 5
+                <state type="xvel" body="pole"/>    ## 6
+                <state type="apos" body="pole"/>    ## 7
+                <state type="avel" body="pole"/>    ## 8
+                """
+                plate_x = pos
+                
+                pole_ang = ang
+                mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
+                pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
+                
+                obs[0] = goal
+                obs[1] = pos
+                # obs[5] = pos
+                # obs[7] = np.tanh(ang)
+                obs[7] = ang
+                obs_batch.append(obs)
+
+                action, _ = model.predict(obs, deterministic=True)
+                # next_state, reward, done, _ = env.step(action)
+
+                obs_action.append(action)
+                next_obs_batch.append(obs)
+
+        obs_batch = np.array(obs_batch)
+        next_obs_batch = np.array(next_obs_batch)
+        obs_action = np.array(obs_action)
+
+        # Get sqil reward
+        with th.no_grad():
+            state = th.FloatTensor(obs_batch).to(model.device)
+            action = th.FloatTensor(obs_action).to(model.device)
+            next_state = th.FloatTensor(next_obs_batch).to(model.device)
+
+        done = th.zeros_like(state[...,-1:])
+
+        with th.no_grad():
+            irl_reward = reward_net(state, action, next_state, done)
+
+            irl_reward = irl_reward.cpu().numpy()
+        score = irl_reward
+
+        score = irl_reward
+        flights = score.copy().reshape([num_x, num_y])
+        ax = sns.heatmap(score.reshape([num_x, num_y]), cmap="YlGnBu_r")
+        ax.invert_yaxis()
+        plt.axis('off')
+        # plt.show()
+        smooth_scale = 10
+        z = ndimage.zoom(flights, smooth_scale)
+        contours = np.linspace(np.min(score), np.max(score), 9)
+        cntr = ax.contour(np.linspace(0, num_x, num_x * smooth_scale),
+                        np.linspace(0, num_y, num_y * smooth_scale),
+                        z, levels=contours[:-1], colors='red')
+        ax.invert_yaxis()
+        plt.axis('off')
+
+        ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
+                    * rescale, marker='*', s=100, c='r', edgecolors='k', linewidths=0.5)
+        if use_wandb:
+            wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
+        print(score.reshape([num_x, num_y]))
+        savedir = os.path.join(log_dir,"maps")
+        if not os.path.exists(savedir):
+            os.makedirs(savedir)
+        print(savedir)
+        plt.savefig(savedir + '/%s_%s.png' % (goal, tag))
+        print('Save Itr', goal)
+        plt.close()
+
 def visualize_reward_gt(env_id, log_dir, round_num=-1, tag='', use_wandb=False, ):
     import seaborn as sns
     import matplotlib.pyplot as plt
