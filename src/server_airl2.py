@@ -95,11 +95,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-<<<<<<< Updated upstream
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-fixture","final.pkl"))
-=======
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_mj","final.pkl"))
->>>>>>> Stashed changes
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-dec","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -196,18 +192,12 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-<<<<<<< Updated upstream
             visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args)), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
             visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_train(*args)), 
                              env_id,log_dir,  int(round_num), "primary", is_wandb, )
             visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
                              env_id,log_dir,  int(round_num), "total", is_wandb, )
             
-=======
-            visualize_reward(gail_trainer.gen_algo,lambda *args: 1.0 * gail_trainer.constraint_train.predict_processed(*args) , env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train.predict_processed, env_id,log_dir,  int(round_num), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: 1.0 * gail_trainer.constraint_train.predict_processed(*args) + 1.0 * gail_trainer.primary_train.predict_processed(*args), env_id,log_dir,  int(round_num), "total", is_wandb, )
->>>>>>> Stashed changes
     gail_trainer.train(int(total_steps), callback=cb)  
     
 

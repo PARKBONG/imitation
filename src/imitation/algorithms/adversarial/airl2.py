@@ -138,7 +138,7 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
         self._primary_net = primary_net.to(gen_algo.device)
         self._constraint_net = constraint_net.to(gen_algo.device)
         # self._constraint_net =lambda *args: self._reward_net(*args) - self._primary_net(*args)#.detach() 
-        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args).detach() 
+        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args)#.detach() 
         # self._reward_net = reward_net.to(gen_algo.device)
 
         self._log_dir = log_dir
@@ -169,6 +169,7 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
                 **self._const_disc_opt_kwargs,
             )
         )
+        
         if self._init_tensorboard:
             logging.info("building summary directory at " + self._log_dir)
             summary_dir = os.path.join(self._log_dir, "summary")
@@ -386,7 +387,7 @@ class AIRL2(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
-                batch["log_policy_act_prob"],
+                batch["primary_log_policy_act_prob"],
             )
             primary_loss =F.binary_cross_entropy_with_logits(
                 primary_disc_logits,

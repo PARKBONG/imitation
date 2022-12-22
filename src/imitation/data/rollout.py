@@ -397,16 +397,16 @@ def generate_trajectories(
             if ep_return is not None:
                 monitor_ep_returns.append(ep_return) 
     """
-    # new_trajs = []
-    # for traj in trajectories:
-    #     inv_infos = traj.infos
-    #     inv_infos[-1]["terminal_observation"] = traj.infos[-1]["terminal_observation"] *-1
-    #     inv_traj = types.TrajectoryWithRew(infos=inv_infos, obs=traj.obs*-1, acts=traj.acts * -1, rews=traj.rews,terminal=traj.terminal)
-    #     # if len(traj) == 100:
-    #     #     if traj.infos[-1].get("episode", {}).get("r") > 160:
-    #     new_trajs.append(traj)
-    #     new_trajs.append(inv_traj)
-    # trajectories = new_trajs
+    new_trajs = []
+    for traj in trajectories:
+        inv_infos = traj.infos
+        inv_infos[-1]["terminal_observation"] = traj.infos[-1]["terminal_observation"] *-1
+        inv_traj = types.TrajectoryWithRew(infos=inv_infos, obs=traj.obs*-1, acts=traj.acts * -1, rews=traj.rews,terminal=traj.terminal)
+        # if len(traj) == 100:
+        #     if traj.infos[-1].get("episode", {}).get("r") > 160:
+        new_trajs.append(traj)
+        new_trajs.append(inv_traj)
+    trajectories = new_trajs
     rng.shuffle(trajectories)
 
     # Sanity checks.

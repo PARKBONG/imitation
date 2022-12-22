@@ -22,10 +22,7 @@ def save(trainer, save_path):
     if hasattr(trainer, "primary_train"):
         saving_net_train = trainer.primary_train
         saving_net_test = trainer.primary_test
-<<<<<<< Updated upstream
-=======
         th.save(saving_net_train, os.path.join(save_path, "primary_train_full.pt"))
->>>>>>> Stashed changes
         while isinstance(saving_net_train, RewardNetWrapper) or hasattr(saving_net_train, "base"):
             saving_net_train = saving_net_train.base
         while isinstance(saving_net_test, RewardNetWrapper) or hasattr(saving_net_test, "base"):
@@ -58,53 +55,14 @@ def save(trainer, save_path):
         trainer.gen_algo,
     )
 
-<<<<<<< Updated upstream
-=======
 def get_cmap(n, name='hsv'):
     '''Returns a function that maps each index in 0, 1, ..., n-1 to a distinct 
     RGB color; the keyword argument name must be a standard mpl colormap name.'''
     return plt.cm.get_cmap(name, n)
->>>>>>> Stashed changes
 def plot_reward(model, reward_net, env, log_dir, round_num, tag='', use_wandb=False, sa_pair=None):
     observation_space = env.observation_space.shape[-1]
     print(observation_space)
     plot_grid = (observation_space//5 + 1, 5)
-<<<<<<< Updated upstream
-    
-    obs_batch = sa_pair[0]
-    # obs_action = sa_pair[1]
-    next_obs_batch = sa_pair[0]
-    goal=0
-    action, _ = model.predict(obs_batch, deterministic=True)
-    obs_action = np.array(action)
-
-    # Get sqil reward
-    with th.no_grad():
-        state = th.FloatTensor(obs_batch).to(model.device)
-        action = th.FloatTensor(obs_action).to(model.device)
-        next_state = th.FloatTensor(next_obs_batch).to(model.device)
-
-    done = th.zeros_like(state[...,-1:])
-    
-    with th.no_grad():
-        irl_reward = reward_net(state, action, next_state, done)
-
-        irl_reward = irl_reward.cpu().numpy()
-    score = irl_reward
-
-    for ob in range(observation_space):
-        ax = plt.subplot2grid(plot_grid, (ob//5, ob%5))
-        ax.scatter(obs_batch[...,ob], score, marker='o', s=2, alpha=0.5)
-        labels = [item.get_text() for item in ax.get_xticklabels()]
-        empty_string_labels = ['']*len(labels)
-        ax.set_xticklabels(empty_string_labels)
-    
-    ax = plt.subplot2grid(plot_grid, (plot_grid[0]-1, plot_grid[1]-1))
-    ax.scatter(obs_batch[...,7] - obs_batch[...,3], score, marker='o', s=1, alpha=0.5)
-    labels = [item.get_text() for item in ax.get_xticklabels()]
-    empty_string_labels = ['']*len(labels)
-    ax.set_xticklabels(empty_string_labels)
-=======
    
     fig = plt.gcf()
     fig.set_size_inches(18.5, 10.5) 
@@ -152,7 +110,6 @@ def plot_reward(model, reward_net, env, log_dir, round_num, tag='', use_wandb=Fa
 
         ax.scatter(np.max(np.abs(next_obs_batch[i*1000: (i+1)*1000,10:]),axis=-1), score[i*1000: (i+1)*1000], c=next(cycol), marker='o', s=1, alpha=0.1)
     # labels = [item.get_text() for item in ax.get_xticklabels()] 
->>>>>>> Stashed changes
     if use_wandb:
         wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
     savedir = os.path.join(log_dir,"maps")
@@ -175,11 +132,11 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
     pole_width = 0.15
     pole_height = 0.8
     anchor_height = 0.1
-    grid_size = 0.05
+    grid_size = 0.025
     rescale= int(1/grid_size)
-    boundary_low = -2.1
-    boundary_high = 2.1
-    for goal in [-0.8, 0.8]:
+    boundary_low = -1.0
+    boundary_high = 1.0
+    for goal in [-0.3, 0.3]:
         obs_batch = []
         obs_action = []
         next_obs_batch = []
@@ -239,10 +196,24 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
         state = obs_batch
         action = obs_action
         next_state =next_obs_batch
+        
 
         done = np.zeros_like(state[...,-1:])
 
-        irl_reward = reward_net(state, action, next_state, done)
+        # irl_reward = reward_net(state, action, next_state, done)
+        with th.no_grad():
+            state = th.FloatTensor(obs_batch).to(model.device)
+            action = th.FloatTensor(obs_action).to(model.device)
+            next_state = th.FloatTensor(next_obs_batch).to(model.device)
+
+        done = th.zeros_like(state[...,-1:])
+
+        with th.no_grad():
+            irl_reward = reward_net(state, action, next_state, done)
+
+            irl_reward = irl_reward.cpu().numpy()
+        score = irl_reward
+        
         score = irl_reward
 
         score = irl_reward
