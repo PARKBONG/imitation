@@ -1,5 +1,5 @@
 from imitation.algorithms.adversarial.ird import IRD 
-from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet,FixedRewardNet
+from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
 from imitation.util.networks import RunningNorm
 from sb3_contrib import PPO2
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -15,60 +15,39 @@ from imitation.util import util
 import torch as th
 import time
 
-from imitation.algorithms.adversarial.airl_fixed import AIRLFIX
+from imitation.algorithms.adversarial.airl3 import AIRL3
+from imitation.algorithms.adversarial.airl5 import AIRL5
+from imitation.algorithms.adversarial.airl_kl import AIRLKL
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
-from util import visualize_reward, visualize_reward_gt
-from imitation.policies import serialize
+from util import visualize_reward, save, visualize_reward_gt
 
-from imitation.rewards.reward_nets import RewardNetWrapper
-from imitation.rewards.reward_nets import RewardNet
-def save(trainer, save_path):
-    """Save discriminator and generator."""
-    # We implement this here and not in Trainer since we do not want to actually
-    # serialize the whole Trainer (including e.g. expert demonstrations).
-    os.makedirs(save_path, exist_ok=True)
-    if isinstance(trainer._reward_net, RewardNet):
-        th.save(trainer.reward_train, os.path.join(save_path, "reward_train.pt"))
-        th.save(trainer.reward_test, os.path.join(save_path, "reward_test.pt"))
+from torch.nn import functional as F
+from imitation.rewards import reward_nets
 
-    if hasattr(trainer, "primary_train"):
-        saving_net_train = trainer.primary_train
-        saving_net_test = trainer.primary_test
-        th.save(saving_net_train, os.path.join(save_path, "primary_train_full.pt"))
-        while isinstance(saving_net_train, RewardNetWrapper) or hasattr(saving_net_train, "base"):
-            saving_net_train = saving_net_train.base
-        while isinstance(saving_net_test, RewardNetWrapper) or hasattr(saving_net_test, "base"):
-            saving_net_test = saving_net_test.base
+class SigmoidRewardNet(reward_nets.RewardNet):
+    def __init__(self, base: reward_nets.RewardNet):
+        """Builds LogSigmoidRewardNet to wrap `reward_net`."""
+        # TODO(adam): make an explicit RewardNetWrapper class?
+        super().__init__(
+            observation_space=base.observation_space,
+            action_space=base.action_space,
+            normalize_images=base.normalize_images,
+        )
+        self.base = base
+        self.scaler = th.nn.Parameter(th.tensor(0.0, requires_grad=True),requires_grad=True)
 
-        if hasattr(saving_net_train, "mlp"):
-            th.save(saving_net_train.mlp, os.path.join(save_path, "primary_train.pt"))
-            th.save(saving_net_test.mlp, os.path.join(save_path, "primary_test.pt"))
-        else:
-            th.save(saving_net_train, os.path.join(save_path, "primary_train.pt"))
-            th.save(saving_net_test, os.path.join(save_path, "primary_test.pt"))
-    if hasattr(trainer, "constraint_train") and isinstance(trainer._constraint_net, RewardNet):
-        th.save(trainer.constraint_train, os.path.join(save_path, "constraint_full.pt"))
-        # th.save(trainer._running_norm, os.path.join(save_path, "constraint_norm.pt"))
-        saving_net_train = trainer.constraint_train
-        th.save(saving_net_train, os.path.join(save_path, "constraint_train_full.pt"))
-        saving_net_test = trainer.constraint_test
-        while isinstance(saving_net_train, RewardNetWrapper) or hasattr(saving_net_train, "base"):
-            saving_net_train = saving_net_train.base
-        while isinstance(saving_net_test, RewardNetWrapper) or hasattr(saving_net_test, "base"):
-            saving_net_test = saving_net_test.base
-        if hasattr(saving_net_train, "mlp"):
-            th.save(saving_net_train.mlp, os.path.join(save_path, "constraint_train.pt"))
-            th.save(saving_net_test.mlp, os.path.join(save_path, "constraint_test.pt"))
-        else:
-            th.save(saving_net_train, os.path.join(save_path, "constraint_train.pt"))
-            th.save(saving_net_test, os.path.join(save_path, "constraint_test.pt"))
-    serialize.save_stable_model(
-        os.path.join(save_path, "gen_policy"),
-        trainer.gen_algo,
-    )
-
+    def forward(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+    ) -> th.Tensor:
+        logits = self.base.forward(state, action, next_state, done)
+        return F.sigmoid(logits) * self.scaler * 1000
+    
 def load_rollouts(dir):
     with open(dir, 'rb') as f:
         rollouts = types.load(f)
@@ -81,11 +60,10 @@ def make_env(env_id, rank, seed=0):
         env = Monitor(env)
         return env
     return _init
-def reward_form(s, a, ns, d):
-    return s[...,[0,1]]
+
 def reward_fn(s, a, ns, d):
-    return 1*(th.abs(ns[...,0] - ns[...,1]) < 0.025) - 0.1 *(th.abs(ns[...,0]-ns[...,1]))
-combined_size  = 2
+    return s[...,[0,1,2,]]    
+combined_size  = 3
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     
@@ -139,7 +117,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'ird' + comment
-    wandb.init(project='new_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='test_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -170,22 +148,17 @@ def main(cfg: DictConfig):
         hid_sizes=[hid_size, hid_size],
     )
     primary_net = PredefinedRewardNet(
-            venv.observation_space, venv.action_space, reward_fn=reward_form, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
-        hid_sizes=[hid_size, hid_size],)
-    primary_net = BasicRewardNet(
-        venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],
-        
     )
-    gt_net = FixedRewardNet(
-            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=1, use_action=True, #normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
-        #hid_sizes=[hid_size, hid_size],
-    )
-
-    reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
-    constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
-    primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
-    gail_trainer = AIRLFIX(
+    
+    # reward_net = SigmoidRewardNet(reward_net)
+    # reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
+    # constraint_net = SigmoidRewardNet(constraint_net)
+    # primary_net = SigmoidRewardNet(primary_net)
+    # constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
+    # primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
+    gail_trainer = AIRLKL(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -198,7 +171,6 @@ def main(cfg: DictConfig):
         primary_net=primary_net,
         constraint_net=constraint_net,
         disc_opt_cls=opt_cls[rew_opt],
-        gt_net=gt_net,
         # primary_disc_opt_cls=opt_cls[primary_opt],
         # primary_disc_opt_kwargs={"lr":disc_lr},
         # const_disc_opt_cls=opt_cls[constraint_opt],
@@ -209,7 +181,7 @@ def main(cfg: DictConfig):
     eval_env = DummyVecEnv([lambda: gym.make(env_id)] * 1)
     if render:
         eval_env.render(mode='human')
-    checkpoint_interval=5
+    checkpoint_interval=10
     visualize_reward_gt(env_id='',log_dir=log_dir)
     
     def cb(round_num):
@@ -222,9 +194,12 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.primary_train, env_id,log_dir,  int(round_num), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(round_num), "total", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args)), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_train(*args)), 
+                             env_id,log_dir,  int(round_num), "primary", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
+                             env_id,log_dir,  int(round_num), "total", is_wandb, )
+            
     gail_trainer.train(int(total_steps), callback=cb)  
     
 

@@ -33,7 +33,7 @@ from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 from imitation.util.networks import RunningNorm
 
-class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
+class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
     """Adversarial Inverse Reinforcement Learning (`AIRL`_).
 
     .. _AIRL: https://arxiv.org/abs/1710.11248
@@ -352,6 +352,111 @@ class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
     def _next_expert_batch(self) -> Mapping:
         return next(self._endless_expert_iterator)
 
+    def rew_gen(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+        is_expert: th.Tensor, 
+    ):
+
+        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert]# + self._constraint_net(state, action, next_state, done)[~is_expert]
+        return const_output_train.mean()
+
+    def rew_expert(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor,
+
+    ):
+
+        const_output_train = self._reward_net(state, action, next_state, done)[is_expert] #+ self._constraint_net(state, action, next_state, done)[is_expert]
+        # reward = - const_output_train + 0.5 * const_output_train ** 2 
+        reward = -th.exp(-const_output_train) * const_output_train
+        # reward = -const_output_train
+        return reward.mean()
+
+    def primary_gen(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+        is_expert: th.Tensor, 
+        log_policy_act_prob: th.Tensor,
+        primary_log_policy_act_prob: th.Tensor,
+        clip_range: float = 0.4,
+        #clip_range: Union[float, Schedule] = 0.2,
+    ):
+
+        const_output_train = self._primary_net(state, action, next_state, done)[~is_expert]
+        # ratio = th.exp(primary_log_policy_act_prob - log_policy_act_prob)
+        # const_output_train = const_output_train *  th.clamp(ratio, 1 - clip_range, 1 + clip_range)
+        return const_output_train.mean()
+
+    def primary_expert(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor,
+    ):
+        const_output_train = self._primary_net(state, action, next_state, done)[is_expert]
+        # reward = - const_output_train + 0.5 * const_output_train ** 2 
+        # reward = - const_output_train + 0.5 * const_output_train ** 2 
+        reward = - ( th.exp(-const_output_train) /(2 - th.exp(- const_output_train)) ) * const_output_train
+        return reward.mean()
+
+
+    def const_gen(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor,
+        is_expert: th.Tensor, 
+        log_policy_act_prob: th.Tensor,
+        constraint_log_policy_act_prob: th.Tensor,
+        clip_range: float = 0.4,
+        #clip_range: Union[float, Schedule] = 0.2,
+    ):
+
+        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert].detach() -self._primary_net(state, action, next_state, done)[~is_expert]
+        ratio = th.exp(constraint_log_policy_act_prob - log_policy_act_prob)
+        const_output_train = const_output_train * th.clamp( th.clamp(ratio, 1 - clip_range, 1 + clip_range)
+        , 1 - clip_range, 1 + clip_range)
+        return const_output_train.mean()
+
+    def const_expert(
+        self,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor,
+    ):
+
+        const_output_train = self._reward_net(state, action, next_state, done)[is_expert].detach()-self._primary_net(state, action, next_state, done)[is_expert]
+        reward = - const_output_train + 0.5 * const_output_train ** 2 
+        return reward.mean()
+
+    def reg(
+        self,
+        net,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+        is_expert: th.Tensor, 
+    ):
+        rew_output = net(state, action, next_state, done) 
+        reg1 = (rew_output**2).mean()
+        return reg1 #+ reg2
     def train_disc(
         self,
         *,
@@ -398,6 +503,22 @@ class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["labels_expert_is_one"].float(),
             )
 
+            rew_loss_expert = self.rew_expert(
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+            )
+            rew_loss_gen = self.rew_gen(
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["labels_expert_is_one"].long(),
+            )
+            loss = (rew_loss_expert + rew_loss_gen)
+            
             new_batch = self._make_disc_train_batch(
                 gen_samples=gen_samples,
                 expert_samples=gen_samples,
@@ -409,10 +530,28 @@ class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
                 new_batch["done"],
                 new_batch["primary_log_policy_act_prob"],
             )
-            primary_loss =F.binary_cross_entropy_with_logits(
-                primary_disc_logits,
-                new_batch["labels_expert_is_one"].float(),
-            ) 
+            # primary_loss =F.binary_cross_entropy_with_logits(
+            #     primary_disc_logits,
+            #     new_batch["labels_expert_is_one"].float(),
+            # )
+            
+            primary_loss_expert = self.primary_expert(
+                new_batch["state"],
+                new_batch["action"],
+                new_batch["next_state"],
+                new_batch["done"],
+                new_batch["labels_expert_is_one"].long(),
+            )
+            primary_loss_gen = self.primary_gen(
+                new_batch["state"],
+                new_batch["action"],
+                new_batch["next_state"],
+                new_batch["done"],
+                new_batch["labels_expert_is_one"].long(),
+                new_batch["log_policy_act_prob"],
+                new_batch["primary_log_policy_act_prob"],
+            )
+            primary_loss = primary_loss_expert + primary_loss_gen 
             
             loss += 5.0*primary_loss 
             for op in self._disc_opt:

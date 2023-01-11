@@ -134,9 +134,9 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
     anchor_height = 0.1
     grid_size = 0.025
     rescale= int(1/grid_size)
-    boundary_low = -1.0
-    boundary_high = 1.0
-    for goal in [-0.3, 0.3]:
+    boundary_low = -0.7
+    boundary_high = 0.7
+    for goal in [-0.5, 0.5]:
         obs_batch = []
         obs_action = []
         next_obs_batch = []
@@ -149,7 +149,7 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
             num_x = 0
             for ang in np.arange(boundary_low, boundary_high, grid_size):
                 num_x += 1
-                obs = np.zeros(9)
+                obs = np.zeros(15)
                 """
                 <state type="xpos" body="goal"/>    ## 0
                 <state type="xpos" body="plate"/>   ## 1
@@ -169,9 +169,26 @@ def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_
                 
                 obs[0] = goal
                 obs[1] = pos
-                # obs[5] = pos
+                obs[8] = pos
                 # obs[7] = np.tanh(ang)
-                obs[7] = ang
+                """
+                            
+                <state type="apos" body="pole" transform="cos2"/>    ## 10
+                <state type="apos" body="pole" transform="cos4"/>    ## 11
+                <state type="apos" body="pole" transform="sin2"/>    ## 12
+                <state type="apos" body="pole" transform="sin4"/>    ## 13
+                """
+
+                obs[3] = np.cos(ang)
+                obs[4] = np.cos(2*ang)
+                obs[5] = np.sin(ang)
+                obs[6] = np.sin(2*ang)
+                
+                obs[10] = np.cos(ang)
+                obs[11] = np.cos(2*ang)
+                obs[12] = np.sin(ang)
+                obs[13] = np.sin(2*ang)
+                # obs[7] = ang
                 obs_batch.append(obs)
 
                 action, _ = model.predict(obs, deterministic=True)

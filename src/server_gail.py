@@ -35,6 +35,7 @@ import time
 import math
 from imitation.rewards.reward_nets import RewardNetWrapper
 
+from util import visualize_reward, save, visualize_reward_gt
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
@@ -77,234 +78,37 @@ def save(trainer, save_path):
         trainer.gen_algo,
     )
 
-def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_wandb=False, ):
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    env = gym.make(env_id)
-    grid_size = 0.1
-    rescale = 1./grid_size
-
-    cart_width = 4.0 / (12 ** 0.5)
-    cart_height = 1.0 / (12 ** 0.5)
-    plate_width = 0.5
-    plate_height = 0.2
-    pole_width = 0.15
-    pole_height = 0.8
-    anchor_height = 0.1
-    for itr in range(1):
-        state = env.reset()
-
-        obs_batch = []
-        obs_action = []
-        next_obs_batch = []
-
-        plate_ang = 0.0
-        num_y = 0
-        for pos in np.arange(-1, 1, 0.05):
-            num_y += 1
-            num_x = 0
-            for ang in np.arange(-1, 1, 0.05):
-                num_x += 1
-                obs = np.zeros(11)
-                """
-                    <state type="xpos" body="goal"/>    ## 0
-                <state type="xpos" body="plate"/>   ## 1
-                <state type="ypos" body="plate"/>   ## 2
-                <state type="xvel" body="plate"/>   ## 3
-                <state type="apos" body="plate"/>   ## 4   
-                <state type="avel" body="plate"/>   ## 5
-                <state type="xpos" body="pole"/>    ## 6
-                <state type="ypos" body="pole"/>    ## 7
-                <state type="xvel" body="pole"/>    ## 8
-                <state type="apos" body="pole"/>    ## 9
-                <state type="avel" body="pole"/>    ## 10
-                """
-                plate_x = pos
-                
-                pole_ang = ang
-                mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
-                pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
-                
-                obs[0] = 1.0
-                obs[2] = cart_height*3.0
-                obs[1] = pos
-                obs[7] = cart_height*3.0
-                obs[6] = pos
-                obs[9] = ang
-                obs_batch.append(obs)
-
-                action, _ = model.predict(obs, deterministic=True)
-                # next_state, reward, done, _ = env.step(action)
-
-                obs_action.append(action)
-                # next_obs_batch.append(next_state)
-                next_obs_batch.append(obs)
-
-        obs_batch = np.array(obs_batch)
-        next_obs_batch = np.array(next_obs_batch)
-        obs_action = np.array(obs_action)
-
-        # Get sqil reward
-        with torch.no_grad():
-            state = torch.FloatTensor(obs_batch).to(model.device)
-            action = torch.FloatTensor(obs_action).to(model.device)
-            next_state = torch.FloatTensor(next_obs_batch).to(model.device)
-
-        done = torch.zeros_like(state[...,-1:])
-
-        with torch.no_grad():
-            irl_reward = reward_net(state, action, next_state, done)
-
-            irl_reward = irl_reward.cpu().numpy()
-        score = irl_reward
-
-        score = irl_reward
-        flights = score.copy().reshape([num_x, num_y])
-        ax = sns.heatmap(score.reshape([num_x, num_y]), cmap="YlGnBu_r")
-        # ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
-        #            * rescale, marker='*', s=150, c='r', edgecolors='k', linewidths=0.5)
-        # ax.scatter((0.3-boundary_low + np.random.uniform(low=-0.05, high=0.05))*rescale, (0.-boundary_low +
-        #                                                                                   np.random.uniform(low=-0.05, high=0.05))*rescale, marker='o', s=120, c='white', linewidths=0.5, edgecolors='k')
-        # ax.plot([(barrier_range[0] - boundary_low)*rescale, (barrier_range[1] - boundary_low)*rescale], [(barrier_y - boundary_low)*rescale, (barrier_y - boundary_low)*rescale],
-        #         color='k', linewidth=10)
-        ax.invert_yaxis()
-        plt.axis('off')
-        # plt.show()
-        smooth_scale = 10
-        z = ndimage.zoom(flights, smooth_scale)
-        contours = np.linspace(np.min(score), np.max(score), 9)
-        cntr = ax.contour(np.linspace(0, num_x, num_x * smooth_scale),
-                        np.linspace(0, num_y, num_y * smooth_scale),
-                        z, levels=contours[:-1], colors='red')
-        ax.invert_yaxis()
-        plt.axis('off')
-        if use_wandb:
-            wandb.log({f"rewards_map/{tag}": wandb.Image(plt)}, step=round_num)
-        print(score.reshape([num_x, num_y]))
-        savedir = os.path.join(log_dir,"maps")
-        if not os.path.exists(savedir):
-            os.makedirs(savedir)
-        print(savedir)
-        plt.savefig(savedir + '/%s_%s.png' % (itr, tag))
-        print('Save Itr', itr)
-        plt.close()
-
-def visualize_reward_gt(env_id, log_dir, round_num=-1, tag='', use_wandb=False, ):
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    grid_size = 0.1
-    rescale = 1./grid_size
-
-    cart_width = 4.0 / (12 ** 0.5)
-    cart_height = 1.0 / (12 ** 0.5)
-    plate_width = 0.5
-    plate_height = 0.2
-    pole_width = 0.15
-    pole_height = 0.8
-    anchor_height = 0.1
-    for itr in range(1):
-        obs_batch = []
-        obs_action = []
-        next_obs_batch = []
-        rewards = []
-        plate_ang = 0.0
-        num_y = 0
-        for pos in np.arange(-1, 1, 0.05):
-            num_y += 1
-            num_x = 0
-            for ang in np.arange(-1, 1, 0.05):
-                num_x += 1
-                obs = np.zeros(11)
-                """
-                    <state type="xpos" body="goal"/>    ## 0
-                <state type="xpos" body="plate"/>   ## 1
-                <state type="ypos" body="plate"/>   ## 2
-                <state type="xvel" body="plate"/>   ## 3
-                <state type="apos" body="plate"/>   ## 4   
-                <state type="avel" body="plate"/>   ## 5
-                <state type="xpos" body="pole"/>    ## 6
-                <state type="ypos" body="pole"/>    ## 7
-                <state type="xvel" body="pole"/>    ## 8
-                <state type="apos" body="pole"/>    ## 9
-                <state type="avel" body="pole"/>    ## 10
-                """
-                plate_x = pos
-                
-                pole_ang = ang
-                mid_pole_x = plate_x - np.sin(plate_ang)*(plate_height/2)
-                pole_x = mid_pole_x - (np.cos(pole_ang) - np.cos(plate_ang)) * (pole_width/2)
-                
-                obs[0] = 1.0
-                obs[2] = cart_height*3.0
-                obs[1] = pos
-                obs[7] = cart_height*3.0
-                obs[6] = pos
-                obs[9] = ang
-                
-                ucost = 1e-5*(ang**2)
-                # print(self.contact)
-                xcost = np.abs(pos - 0.7)
-                xcost2 = float(np.abs(pos - 0.7) < 0.005)
-                obs_batch.append(obs)
-                reward = 1 * 2 -  1 *xcost + 1*xcost2*2 - 1 * ucost
-                rewards.append(reward)
-                # next_obs_batch.append(next_state)
-                next_obs_batch.append(obs)
-        irl_reward = np.array(rewards)
-        score = irl_reward
-
-        score = irl_reward
-        flights = score.copy().reshape([num_x, num_y])
-        ax = sns.heatmap(score.reshape([num_x, num_y]), cmap="YlGnBu_r")
-        # ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
-        #            * rescale, marker='*', s=150, c='r', edgecolors='k', linewidths=0.5)
-        # ax.scatter((0.3-boundary_low + np.random.uniform(low=-0.05, high=0.05))*rescale, (0.-boundary_low +
-        #                                                                                   np.random.uniform(low=-0.05, high=0.05))*rescale, marker='o', s=120, c='white', linewidths=0.5, edgecolors='k')
-        # ax.plot([(barrier_range[0] - boundary_low)*rescale, (barrier_range[1] - boundary_low)*rescale], [(barrier_y - boundary_low)*rescale, (barrier_y - boundary_low)*rescale],
-        #         color='k', linewidth=10)
-        ax.invert_yaxis()
-        plt.axis('off')
-        # plt.show()
-        smooth_scale = 10
-        z = ndimage.zoom(flights, smooth_scale)
-        contours = np.linspace(np.min(score), np.max(score), 9)
-        cntr = ax.contour(np.linspace(0, num_x, num_x * smooth_scale),
-                        np.linspace(0, num_y, num_y * smooth_scale),
-                        z, levels=contours[:-1], colors='red')
-        ax.invert_yaxis()
-        plt.axis('off')
-        if use_wandb:
-            wandb.log({f"rewards_map/{tag}": wandb.Image(plt)}, step=round_num)
-        print(score.reshape([num_x, num_y]))
-        savedir = os.path.join(log_dir,"maps")
-        if not os.path.exists(savedir):
-            os.makedirs(savedir)
-        print(savedir)
-        plt.savefig(savedir + '/%s_%s.png' % (itr, tag))
-        print('Save Itr', itr)
-        plt.close()
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
+    
     n_envs = int(cfg.n_envs)
     total_steps = int(cfg.total_steps)
     is_wandb = bool(cfg.is_wandb)
     device = cfg.device
+    render = bool(cfg.render)
     
     env_id = cfg.env.env_id
     r_gamma = float(cfg.env.r_gamma)
     
     gen_lr = float(cfg.gen.lr)
     ent_coef = float(cfg.gen.ent_coef)
-    target_kl = int(cfg.gen.target_kl)
+    target_kl = float(cfg.gen.target_kl)
     batch_size = int(cfg.gen.batch_size)
     n_epochs = int(cfg.gen.n_epochs)
+    n_steps = int(cfg.gen.n_steps)
+
+    rew_opt = cfg.disc.reward_net_opt
+    primary_opt = cfg.disc.primary_net_opt
+    constraint_opt = cfg.disc.constraint_net_opt
+
     
     disc_lr = float(cfg.disc.lr)
     demo_batch_size = int(cfg.disc.demo_batch_size)
     gen_replay_buffer_capacity = int(cfg.disc.gen_replay_buffer_capacity)
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving_imit","final.pkl"))
+    normalize = cfg.disc.normalize
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-neo","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -345,13 +149,11 @@ def main(cfg: DictConfig):
         env=venv,
         policy=MlpPolicy,
         batch_size=batch_size,
-        # n_steps=512,
         ent_coef=ent_coef,
         learning_rate=gen_lr,
-        #n_epochs=80,
-        n_epochs=n_epochs,
         target_kl=target_kl,
-        # n_steps=int(2048/32),
+        n_epochs=n_epochs,
+        n_steps=n_steps,
         policy_kwargs={'optimizer_class':th.optim.Adam},
         tensorboard_log='./logs/',
         device=device,
@@ -416,8 +218,8 @@ def main(cfg: DictConfig):
 
     eval_env = DummyVecEnv([lambda: gym.make(env_id)] * 1)
     eval_env.render(mode='human')
-    checkpoint_interval=3
-    visualize_reward_gt(env_id='',log_dir=log_dir)
+    checkpoint_interval=10
+    # visualize_reward_gt(env_id='',log_dir=log_dir)
     
     def cb(round_num):
         if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:

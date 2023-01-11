@@ -61,8 +61,8 @@ def make_env(env_id, rank, seed=0):
     return _init
 
 def reward_fn(s, a, ns, d):
-    return s[...,[0,1]]    
-combined_size  = 2
+    return s[...,[0,1,2,]]    
+combined_size  = 3
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     
@@ -96,7 +96,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-jan","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-neo","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
