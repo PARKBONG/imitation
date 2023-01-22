@@ -404,7 +404,7 @@ class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
             )
             primary_disc_logits = self.primary_logits_expert_is_high(
                 new_batch["state"],
-                new_batch["action"],
+                new_batch["primary_action"],
                 new_batch["next_state"],
                 new_batch["done"],
                 new_batch["primary_log_policy_act_prob"],

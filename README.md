@@ -32,8 +32,8 @@ render
 
 python3 -m imitation.scripts.eval_policy with serving \
 policy_type=sac_lag \
-policy_path=jjh_data/expert_models/serving-neo/ \
-rollout_save_path=jjh_data/expert_models/serving-neo/final.pkl \
+policy_path=jjh_data/expert_models/serving-oneway/ \
+rollout_save_path=jjh_data/expert_models/serving-oneway/final.pkl \
 render
 python3 -m imitation.scripts.eval_policy with serving \
 policy_type=sac_lag \

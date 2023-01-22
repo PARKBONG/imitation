@@ -17,7 +17,6 @@ import time
 
 from imitation.algorithms.adversarial.airl3 import AIRL3
 from imitation.algorithms.adversarial.airl5 import AIRL5
-from imitation.algorithms.adversarial.airl_kl import AIRLKL
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
@@ -97,7 +96,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-oneway","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-neo","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -147,11 +146,6 @@ def main(cfg: DictConfig):
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
         hid_sizes=[hid_size, hid_size],
     )
-
-    custom_net = BasicRewardNet(
-        venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
-        hid_sizes=[hid_size, hid_size],
-    )
     primary_net = PredefinedRewardNet(
             venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],
@@ -163,7 +157,7 @@ def main(cfg: DictConfig):
     # primary_net = SigmoidRewardNet(primary_net)
     # constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
     # primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
-    gail_trainer = AIRLKL(
+    gail_trainer = AIRL5(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -175,7 +169,6 @@ def main(cfg: DictConfig):
         log_dir=log_dir,
         primary_net=primary_net,
         constraint_net=constraint_net,
-        custom_net=custom_net,
         disc_opt_cls=opt_cls[rew_opt],
         # primary_disc_opt_cls=opt_cls[primary_opt],
         # primary_disc_opt_kwargs={"lr":disc_lr},
@@ -200,7 +193,7 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.constraint_train(*args) ), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.reward_train(*args) - 1.0 * gail_trainer.primary_train(*args)), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
             visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_train(*args)), 
                              env_id,log_dir,  int(round_num), "primary", is_wandb, )
             visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
