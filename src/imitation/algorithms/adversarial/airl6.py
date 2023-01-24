@@ -33,7 +33,7 @@ from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 from imitation.util.networks import RunningNorm
 
-class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
+class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
     """Adversarial Inverse Reinforcement Learning (`AIRL`_).
 
     .. _AIRL: https://arxiv.org/abs/1710.11248
@@ -57,7 +57,6 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
         reward_net: reward_nets.RewardNet,
         primary_net: reward_nets.RewardNet,
         constraint_net: reward_nets.RewardNet,
-        custom_net: reward_nets.RewardNet, 
         n_disc_updates_per_round: int = 2,
         log_dir: str = "output/",
         disc_opt_cls: Type[th.optim.Optimizer] = th.optim.Adam,
@@ -138,9 +137,8 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
 
         self._primary_net = primary_net.to(gen_algo.device)
         self._constraint_net = constraint_net.to(gen_algo.device)
-        self._custom_net = custom_net.to(gen_algo.device)
         # self._constraint_net =lambda *args: self._reward_net(*args) - self._primary_net(*args)#.detach() 
-        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args).detach()
+        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args).detach() 
         self._running_norm = RunningNorm(1).to(gen_algo.device)
         
         # self._reward_net = reward_net.to(gen_algo.device)
@@ -173,13 +171,7 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
                 **self._const_disc_opt_kwargs,
             )
         )
-       
-        self._disc_opt.append(
-            self._disc_opt_cls(
-                self._custom_net.parameters(),
-                **self._const_disc_opt_kwargs,
-            )
-        ) 
+        
         if self._init_tensorboard:
             logging.info("building summary directory at " + self._log_dir)
             summary_dir = os.path.join(self._log_dir, "summary")
@@ -217,7 +209,6 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
         else:
             self.gen_train_timesteps = gen_train_timesteps
 
-        self.gen_replay_buffer_capacity = gen_replay_buffer_capacity
         if gen_replay_buffer_capacity is None:
             gen_replay_buffer_capacity = self.gen_train_timesteps
         self._gen_replay_buffer = buffer.ReplayBuffer(
@@ -309,8 +300,8 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             raise TypeError(
                 "Non-None `log_policy_act_prob` is required for this method.",
             )
-        const_output_train = self._custom_net(state, action, next_state, done)
-        return const_output_train  #- primary_log_policy_act_prob
+        const_output_train = self._primary_net(state, action, next_state, done)
+        return const_output_train - primary_log_policy_act_prob
 
     @property
     def reward_train(self) -> reward_nets.RewardNet:
@@ -325,18 +316,6 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             reward_net = reward_net.base
         return reward_net
 
-    @property
-    def custom_train(self) -> reward_nets.RewardNet:
-        return self._custom_net
-
-    @property
-    def custom_test (self) -> reward_nets.RewardNet:
-        """Returns the unshaped version of reward network used for testing."""
-        reward_net = self._custom_net
-        # Recursively return the base network of the wrapped reward net
-        while isinstance(reward_net, reward_nets.RewardNetWrapper):
-            reward_net = reward_net.base
-        return reward_net
     @property
     def constraint_train(self) -> reward_nets.RewardNet:
         return self._constraint_net
@@ -373,150 +352,6 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
     def _next_expert_batch(self) -> Mapping:
         return next(self._endless_expert_iterator)
 
-    def rew_gen(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-        is_expert: th.Tensor, 
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert]# + self._constraint_net(state, action, next_state, done)[~is_expert]
-        return const_output_train.mean()
-
-    def rew_expert(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor,
-
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[is_expert] #+ self._constraint_net(state, action, next_state, done)[is_expert]
-        reward = - const_output_train + 0.5 * const_output_train ** 2 
-        # reward = -th.exp(-const_output_train) * const_output_train
-        # reward = -const_output_train
-        return reward.mean()
-
-    def custom_gen(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-        is_expert: th.Tensor, 
-        log_policy_act_prob: th.Tensor,
-        primary_log_policy_act_prob: th.Tensor,
-        clip_range: float = 0.4,
-        #clip_range: Union[float, Schedule] = 0.2,
-    ):
-
-        const_output_train = self._custom_net(state, action, next_state, done)[~is_expert]
-        return const_output_train.mean()
-
-    def custom_expert(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor,
-    ):
-        const_output_train = self._custom_net(state, action, next_state, done)[is_expert]
-        reward = -th.exp(-const_output_train) * const_output_train
-        return reward.mean()
-    
-    def primary_gen(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-        is_expert: th.Tensor, 
-        log_policy_act_prob: th.Tensor,
-        primary_log_policy_act_prob: th.Tensor,
-        clip_range: float = 0.4,
-        #clip_range: Union[float, Schedule] = 0.2,
-    ):
-
-        const_output_train = self._primary_net(state, action, next_state, done)[~is_expert]
-        # ratio = th.exp(primary_log_policy_act_prob - log_policy_act_prob)
-        # const_output_train = const_output_train *  th.clamp(ratio, 1 - clip_range, 1 + clip_range)
-        return const_output_train.mean()
-
-    def primary_expert(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor,
-    ):
-        const_output_train = self._primary_net(state, action, next_state, done)[is_expert]
-        # reward = - const_output_train + 0.5 * const_output_train ** 2 
-        # reward = - const_output_train + 0.5 * const_output_train ** 2 
-        reward = -th.exp(-const_output_train) * const_output_train
-        # reward = - ( th.exp(-const_output_train) /(2 - th.exp(- const_output_train)) ) * const_output_train
-        return reward.mean()
-
-
-    def const_gen(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor,
-        is_expert: th.Tensor, 
-        log_policy_act_prob: th.Tensor,
-        constraint_log_policy_act_prob: th.Tensor,
-        clip_range: float = 0.4,
-        #clip_range: Union[float, Schedule] = 0.2,
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[~is_expert].detach() -self._primary_net(state, action, next_state, done)[~is_expert]
-        ratio = th.exp(constraint_log_policy_act_prob - log_policy_act_prob)
-        const_output_train = const_output_train * th.clamp( th.clamp(ratio, 1 - clip_range, 1 + clip_range)
-        , 1 - clip_range, 1 + clip_range)
-        return const_output_train.mean()
-
-    def const_expert(
-        self,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        done: th.Tensor, 
-        is_expert: th.Tensor,
-    ):
-
-        const_output_train = self._reward_net(state, action, next_state, done)[is_expert].detach()-self._primary_net(state, action, next_state, done)[is_expert]
-        reward = - const_output_train + 0.5 * const_output_train ** 2 
-        return reward.mean()
-
-    def reg(
-        self,
-        Q_net,
-        r_net,
-        state: th.Tensor,
-        action: th.Tensor,
-        next_state: th.Tensor,
-        next_action: th.Tensor,
-        done: th.Tensor, 
-    ):
-        """
-        Q_cur = Q_net(state, action, next_state=None, done=done).detach()
-        Q_next = Q_net(next_state, next_action, next_state=None, done=done).detach()
-        r_net = r_net(state, action, next_state, done)  
-        reg1 = ((self.gen_algo.gamma * Q_next - Q_cur - r_net)**2).mean()
-        """
-
-        Q_cur = Q_net(state, action, next_state=None, done=done).detach()
-        r_net = r_net(state, action, next_state, done)  
-        reg1 = ((Q_cur - r_net)**2).mean()
-        return reg1 #+ reg2
-    
     def train_disc(
         self,
         *,
@@ -542,7 +377,6 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
         # self._reward_net.train()
         self._primary_net.train()
         self._constraint_net.train()
-
         with self.logger.accumulate_means("disc"):
             # optionally write TB summaries for collected ops
             write_summaries = self._init_tensorboard and self._global_step % 20 == 0
@@ -564,27 +398,10 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["labels_expert_is_one"].float(),
             )
 
-            # rew_loss_expert = self.rew_expert(
-            #     batch["state"],
-            #     batch["action"],
-            #     batch["next_state"],
-            #     batch["done"],
-            #     batch["labels_expert_is_one"].long(),
-            # )
-            # rew_loss_gen = self.rew_gen(
-            #     batch["state"],
-            #     batch["action"],
-            #     batch["next_state"],
-            #     batch["done"],
-            #     batch["labels_expert_is_one"].long(),
-            # )
-            # loss = (rew_loss_expert + rew_loss_gen)
-            
             new_batch = self._make_disc_train_batch(
                 gen_samples=gen_samples,
                 expert_samples=gen_samples,
-            ) 
-
+            )
             primary_disc_logits = self.primary_logits_expert_is_high(
                 new_batch["state"],
                 new_batch["primary_action"],
@@ -596,28 +413,8 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
                 primary_disc_logits,
                 new_batch["labels_expert_is_one"].float(),
             ) 
-             
-            # primary_loss_expert = self.primary_expert(
-            #     new_batch["state"],
-            #     new_batch["primary_action"],
-            #     new_batch["next_state"],
-            #     new_batch["done"],
-            #     new_batch["labels_expert_is_one"].long(),
-            # )
-            # primary_loss_gen = self.primary_gen(
-            #     new_batch["state"],
-            #     new_batch["primary_action"],
-            #     new_batch["next_state"],
-            #     new_batch["done"],
-            #     new_batch["labels_expert_is_one"].long(),
-            #     new_batch["log_policy_act_prob"],
-            #     new_batch["primary_log_policy_act_prob"],
-            # )
-            # primary_loss = primary_loss_expert + primary_loss_gen 
             
-            
-            loss += primary_loss 
-            # loss += reg_loss
+            loss += 5.0*primary_loss 
             for op in self._disc_opt:
                 op.zero_grad()
             loss.backward()
@@ -625,10 +422,6 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
                 op.step()
             self._disc_step += 1
 
-            reg_loss = self.train_project(
-                q_net = self._custom_net,
-                r_net = self._primary_net,
-            )
             # compute/write stats and TensorBoard data
             with th.no_grad():
                 train_stats = compute_train_stats(
@@ -637,14 +430,13 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
                     loss,
                 )
             self.logger.record("global_step", self._global_step)
-            
+
             for k, v in train_stats.items():
                 self.logger.record(k, v)
-            self.logger.record("reg_loss", float(reg_loss.detach().cpu().numpy()))
             self.logger.dump(self._disc_step)
             if write_summaries:
                 self._summary_writer.add_histogram("disc_logits", disc_logits.detach())
-                # self._summary_writer.add_histogram("disc_logits(primary)", primary_disc_logits.detach())
+                self._summary_writer.add_histogram("disc_logits(primary)", primary_disc_logits.detach())
 
         # self._reward_net.eval()
         self._primary_net.eval()
@@ -763,104 +555,6 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             return None
         return log_policy_act_prob_th
 
-    def train_project(
-        self,
-        q_net,
-        r_net,
-        num_itr = 5,
-    ):
-        total_loss = 0
-        for itr in range(num_itr):
-            expert_samples = self._next_expert_batch()
-            gen_samples = self._gen_replay_buffer.sample(self.gen_replay_buffer_capacity)
-            gen_samples = types.dataclass_quick_asdict(gen_samples)
-
-            if gen_samples is None:
-                if self._gen_replay_buffer.size() == 0:
-                    raise RuntimeError(
-                        "No generator samples for training. " "Call `train_gen()` first.",
-                    )
-                gen_samples = self._gen_replay_buffer.sample(self.demo_batch_size)
-                gen_samples = types.dataclass_quick_asdict(gen_samples)
-
-            n_gen = len(gen_samples["obs"])
-            n_expert = len(expert_samples["obs"])
-            # Guarantee that Mapping arguments are in mutable form.
-            expert_samples = dict(expert_samples)
-            gen_samples = dict(gen_samples)
-
-            # Convert applicable Tensor values to NumPy.
-            for field in dataclasses.fields(types.Transitions):
-                k = field.name
-                if k == "infos":
-                    continue
-                for d in [gen_samples, expert_samples]:
-                    if isinstance(d[k], th.Tensor):
-                        d[k] = d[k].detach().numpy()
-            assert isinstance(gen_samples["obs"], np.ndarray)
-            assert isinstance(expert_samples["obs"], np.ndarray)
-
-            # Check dimensions.
-            n_samples = n_expert + n_gen
-            assert n_expert == len(expert_samples["acts"])
-            assert n_expert == len(expert_samples["next_obs"])
-            assert n_gen == len(gen_samples["acts"])
-            assert n_gen == len(gen_samples["next_obs"])
-
-            # Concatenate rollouts, and label each row as expert or generator.
-            obs = np.concatenate([expert_samples["obs"], gen_samples["obs"]])
-            acts = np.concatenate([expert_samples["acts"], gen_samples["acts"]])
-            next_obs = np.concatenate([expert_samples["next_obs"], gen_samples["next_obs"]])
-            dones = np.concatenate([expert_samples["dones"], gen_samples["dones"]])
-            # notice that the labels use the convention that expert samples are
-            # labelled with 1 and generator samples with 0.
-
-            with th.no_grad():
-                # Convert to pytorch tensor or to TensorDict
-                _obs_tensor = obs_as_tensor(next_obs, self.gen_algo.device)
-                _next_acts, values, log_probs = self.policy(_obs_tensor)
-                _next_acts = _next_acts.detach().cpu().numpy()
-                assert _next_acts.shape == acts.shape
-            next_acts = _next_acts
-
-            obs_th, acts_th, next_obs_th, dones_th = self.primary_train.preprocess(
-                obs,
-                acts,
-                next_obs,
-                dones,
-            )
-
-            _, next_acts_th, _, _ = self.primary_train.preprocess(
-                obs,
-                next_acts,
-                next_obs,
-                dones,
-            )
-            batch = {
-                "state": obs_th,
-                "action": acts_th,
-                "next_action": next_acts_th,
-                "next_state": next_obs_th,
-                "done": dones_th,
-            }
-
-            loss = self.reg(
-                q_net,
-                r_net,
-                batch["state"],
-                batch["action"],
-                batch["next_state"], 
-                batch["next_action"], 
-                batch["done"],
-            )
-            for op in self._disc_opt:
-                op.zero_grad()
-            loss.backward()
-            for op in self._disc_opt:
-                op.step()
-            total_loss += loss
-        return total_loss
-
     def _make_disc_train_batch(
         self,
         *,
@@ -947,15 +641,6 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             assert primary_actions.shape == gen_samples["acts"].shape
         primary_acts = np.concatenate([expert_samples["acts"], primary_actions])
 
-
-        with th.no_grad():
-            # Convert to pytorch tensor or to TensorDict
-            _obs_tensor = obs_as_tensor(obs, self.gen_algo.device)
-            _next_acts, values, log_probs = self.policy(_obs_tensor)
-            _next_acts = _next_acts.detach().cpu().numpy()
-            assert _next_acts.shape == acts.shape
-        next_acts = _next_acts
-
         labels_expert_is_one = np.concatenate(
             [np.ones(n_expert, dtype=int), np.zeros(n_gen, dtype=int)],
         )
@@ -969,7 +654,7 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             const_acts_th = th.as_tensor(const_acts, device=self.gen_algo.device)
 
             log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th)
-            primary_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, primary_acts_th, self.primary_policy)
+            primary_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.primary_policy)
             const_log_policy_act_prob = self._get_log_policy_act_prob(obs_th, acts_th, self.const_policy)
             if log_policy_act_prob is not None:
                 assert len(log_policy_act_prob) == n_samples
@@ -1002,18 +687,11 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             dones,
         )
 
-        _, next_acts_th, _, _ = self.primary_train.preprocess(
-            obs,
-            next_acts,
-            next_obs,
-            dones,
-        )
         batch_dict = {
             "state": obs_th,
             "action": acts_th,
             "primary_action": primary_acts_th,
             "const_action": const_acts_th,
-            "next_action": next_acts_th,
             "next_state": next_obs_th,
             "done": dones_th,
             "labels_expert_is_one": self._torchify_array(labels_expert_is_one),

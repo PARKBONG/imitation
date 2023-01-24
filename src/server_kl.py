@@ -1,7 +1,7 @@
 from imitation.algorithms.adversarial.ird import IRD 
-from imitation.rewards.reward_nets import BasicRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
+from imitation.rewards.reward_nets import BasicRewardNet, PredefinedShapedRewardNet, BasicShapedRewardNet, NormalizedRewardNet, ScaledRewardNet, ShapedScaledRewardNet, PredefinedRewardNet, DropoutRewardNet
 from imitation.util.networks import RunningNorm
-from sb3_contrib import PPO3
+from sb3_contrib import PPO3, PPO2
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.ppo import MlpPolicy 
@@ -62,8 +62,8 @@ def make_env(env_id, rank, seed=0):
     return _init
 
 def reward_fn(s, a, ns, d):
-    return s[...,[0,1,2,]]    
-combined_size  = 3
+    return ns[...,[0,1,]]    
+combined_size  = 2
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     
@@ -152,9 +152,9 @@ def main(cfg: DictConfig):
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
         hid_sizes=[hid_size, hid_size],
     )
-    primary_net = PredefinedRewardNet(
-            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
-        hid_sizes=[hid_size, hid_size],
+    primary_net = PredefinedShapedRewardNet(
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=False, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
+        hid_sizes=[hid_size, hid_size], discount_factor=0.99
     )
     
     # reward_net = SigmoidRewardNet(reward_net)
@@ -201,10 +201,10 @@ def main(cfg: DictConfig):
                     eval_env.render(mode='human')
                     time.sleep(0.005)
             visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.constraint_train(*args) ), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_train(*args)), 
-                             env_id,log_dir,  int(round_num), "primary", is_wandb, )
-            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
-                             env_id,log_dir,  int(round_num), "total", is_wandb, )
+            # visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_test(*args)), 
+            #                  env_id,log_dir,  int(round_num), "primary", is_wandb, )
+            # visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
+            #                  env_id,log_dir,  int(round_num), "total", is_wandb, )
             
     gail_trainer.train(int(total_steps), callback=cb)  
     
