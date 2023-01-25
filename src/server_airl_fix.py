@@ -119,7 +119,7 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-neo","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-oneway","final.pkl"))
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -139,7 +139,7 @@ def main(cfg: DictConfig):
     else:
         comment = f"_{str(cfg.comment)}"
     name = 'ird' + comment
-    wandb.init(project='new_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
+    wandb.init(project='test_bench', sync_tensorboard=True, dir=log_dir, config=cfg, name=name)
     # if "wandb" in log_format_strs:
     #     wb.wandb_init(log_dir=log_dir)
     custom_logger = imit_logger.configure(
@@ -172,11 +172,11 @@ def main(cfg: DictConfig):
     primary_net = PredefinedRewardNet(
             venv.observation_space, venv.action_space, reward_fn=reward_form, combined_size=combined_size, use_action=True, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         hid_sizes=[hid_size, hid_size],)
-    primary_net = BasicRewardNet(
-        venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
-        hid_sizes=[hid_size, hid_size],
+    # primary_net = BasicShapedRewardNet(
+    #     venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
+    #     # hid_sizes=[hid_size, hid_size],
         
-    )
+    # )
     gt_net = FixedRewardNet(
             venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=1, use_action=True, #normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         #hid_sizes=[hid_size, hid_size],
@@ -209,7 +209,7 @@ def main(cfg: DictConfig):
     eval_env = DummyVecEnv([lambda: gym.make(env_id)] * 1)
     if render:
         eval_env.render(mode='human')
-    checkpoint_interval=5
+    checkpoint_interval=10
     visualize_reward_gt(env_id='',log_dir=log_dir)
     
     def cb(round_num):

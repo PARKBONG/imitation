@@ -423,16 +423,23 @@ class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["labels_expert_is_one"].float(),
             ) 
             
-            reg_loss = self.reg(
+            reg_loss1 = self.reg(
                 self._primary_net,
                 batch["state"],
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
             )
-            
-            loss += 1.0*primary_loss 
-            # loss += reg_loss
+           
+            reg_loss2 = self.reg(
+                self._constraint_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+            ) 
+            loss += 5.0*primary_loss 
+            loss += reg_loss1 + reg_loss2
             
             for op in self._disc_opt:
                 op.zero_grad()

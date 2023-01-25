@@ -417,96 +417,6 @@ class FixedRewardNet(RewardNet):
             # if the model has no parameters, we use the CPU
             return th.device("cuda") 
 
-class PredefinedShapedRewardNet(RewardNet):
-    """MLP that takes as input the state, action, next state and done flag.
-
-    These inputs are flattened and then concatenated to one another. Each input
-    can enabled or disabled by the `use_*` constructor keyword arguments.
-    """
-
-    def __init__(
-        self,
-        observation_space: gym.Space,
-        action_space: gym.Space,
-        reward_fn,
-        combined_size,
-        discount_factor: float,
-        use_action = True,
-        **kwargs,
-    ):
-        """Builds reward MLP.
-
-        Args:
-            observation_space: The observation space.
-            action_space: The action space.
-            use_state: should the current state be included as an input to the MLP?
-            use_action: should the current action be included as an input to the MLP?
-            use_next_state: should the next state be included as an input to the MLP?
-            use_done: should the "done" flag be included as an input to the MLP?
-            kwargs: passed straight through to `build_mlp`.
-        """
-        super().__init__(observation_space, action_space)
-        combined_size = combined_size
-
-        self.use_action = use_action
-        if self.use_action:
-            combined_size += preprocessing.get_flattened_obs_dim(action_space)
-        self.reward_fn = reward_fn
-        full_build_mlp_kwargs = {
-            "hid_sizes": (32, 32),
-        }
-        full_build_mlp_kwargs.update(kwargs)
-        full_build_mlp_kwargs.update(
-            {
-                # we do not want these overridden
-                "in_size": combined_size,
-                "out_size": 1,
-                "squeeze_output": True,
-            },
-        )
-        self.discount_factor = discount_factor
-        self.mlp = networks.build_mlp(**full_build_mlp_kwargs)
-
-        self.potential = BasicPotentialMLP(
-            observation_space=observation_space,
-            # hid_sizes=(32, 32),
-            **kwargs,
-        )
-        
-    def forward(self, state, action, next_state, done):
-        reward_form = self.reward_fn(state, action, next_state, done)
-
-        new_shaping_output = self.potential(next_state).flatten()
-        old_shaping_output = self.potential(state).flatten()
-
-        # new_shaping = (1 - done.float()) * new_shaping_output
-        new_shaping = new_shaping_output
-        
-        inputs = []
-        inputs.append(reward_form)
-        # if self.use_state:
-        #     inputs.append(th.flatten(state, 1))
-        if self.use_action:
-            inputs.append(th.flatten(action, 1))
-        # if self.use_next_state:
-        #     inputs.append(th.flatten(next_state, 1))
-        # if self.use_done:
-        #     inputs.append(th.reshape(done, [-1, 1]))
-
-        inputs_concat = th.cat(inputs, dim=1)
-
-        outputs = self.mlp(inputs_concat) 
-        assert outputs.shape == state.shape[:1]
-        assert new_shaping.shape == state.shape[:1]
-        assert old_shaping_output.shape == state.shape[:1]
-        
-        final_rew = (
-            outputs
-            + self.discount_factor * new_shaping
-            - old_shaping_output
-        )
-        assert final_rew.shape == state.shape[:1]
-        return final_rew
 
 class PredefinedRewardNet(RewardNet):
     """MLP that takes as input the state, action, next state and done flag.
@@ -844,6 +754,73 @@ class ShapedRewardNet(RewardNetWrapper):
         assert final_rew.shape == state.shape[:1]
         return final_rew
 
+class PredefinedShapedRewardNet(ShapedRewardNet):
+    """MLP that takes as input the state, action, next state and done flag.
+
+    These inputs are flattened and then concatenated to one another. Each input
+    can enabled or disabled by the `use_*` constructor keyword arguments.
+    """
+
+    def __init__(
+        self,
+        observation_space: gym.Space,
+        action_space: gym.Space,
+        reward_fn,
+        combined_size,
+        *,
+        reward_hid_sizes: Sequence[int] = (32,),
+        potential_hid_sizes: Sequence[int] = (32, 32),
+        use_state: bool = True,
+        use_action: bool = True,
+        use_next_state: bool = False,
+        use_done: bool = False,
+        discount_factor: float = 0.99,
+        **kwargs,
+    ):
+        """Builds a simple shaped reward network.
+
+        Args:
+            observation_space: The observation space.
+            action_space: The action space.
+            reward_hid_sizes: sequence of widths for the hidden layers
+                of the base reward MLP.
+            potential_hid_sizes: sequence of widths for the hidden layers
+                of the potential MLP.
+            use_state: should the current state be included as an input
+                to the reward MLP?
+            use_action: should the current action be included as an input
+                to the reward MLP?
+            use_next_state: should the next state be included as an input
+                to the reward MLP?
+            use_done: should the "done" flag be included as an input to the reward MLP?
+            discount_factor: discount factor for the potential shaping.
+            kwargs: passed straight through to `BasicRewardNet` and `BasicPotentialMLP`.
+        """
+        base_reward_net = PredefinedRewardNet(
+            observation_space=observation_space,
+            action_space=action_space,
+            # use_state=use_state,
+            reward_fn=reward_fn,
+            combined_size=combined_size,
+            use_action=use_action,
+            # use_next_state=use_next_state,
+            # use_done=use_done,
+            hid_sizes=reward_hid_sizes,
+            **kwargs,
+        )
+
+        potential_net = BasicPotentialMLP(
+            observation_space=observation_space,
+            hid_sizes=potential_hid_sizes,
+            **kwargs,
+        )
+
+        super().__init__(
+            base_reward_net,
+            potential_net,
+            discount_factor=discount_factor,
+        )
+       
 
 class BasicShapedRewardNet(ShapedRewardNet):
     """Shaped reward net based on MLPs.

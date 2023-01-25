@@ -14,8 +14,10 @@ import sys
 from imitation.util import util
 import torch as th
 import time
+import numpy as np
 
 from imitation.algorithms.adversarial.airl3 import AIRL3
+from imitation.algorithms.adversarial.airl import AIRL
 from imitation.algorithms.adversarial.airl5 import AIRL5
 from imitation.algorithms.adversarial.airl6 import AIRL6
 from imitation.algorithms.adversarial.airl_kl import AIRLKL
@@ -63,8 +65,9 @@ def make_env(env_id, rank, seed=0):
     return _init
 
 def reward_fn(s, a, ns, d):
-    return ns[...,[0,1,]]    
-combined_size  = 2
+    # return th.concat([s[...,[0,1]], ns[...,[0,1]]], dim=0)
+    return  s[...,[0,1,2]]
+combined_size  = 3
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     
@@ -144,9 +147,12 @@ def main(cfg: DictConfig):
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
         hid_sizes=[hid_size, hid_size],
     )
-    constraint_net = BasicRewardNet(
+    constraint_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
-        hid_sizes=[hid_size, hid_size],
+        # hid_sizes=[hid_size, hid_size],
+        use_state=True,
+        use_action=False,
+        use_next_state=False,
     )
 
     custom_net = BasicRewardNet(
@@ -155,7 +161,7 @@ def main(cfg: DictConfig):
     )
     primary_net = PredefinedShapedRewardNet(
             venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=False, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
-        hid_sizes=[hid_size, hid_size], discount_factor=0.99
+        discount_factor=0.99
     )
     
     # reward_net = SigmoidRewardNet(reward_net)
@@ -201,9 +207,9 @@ def main(cfg: DictConfig):
                 if render:
                     eval_env.render(mode='human')
                     time.sleep(0.005)
-            visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.constraint_train(*args) ), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
-            # visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_test(*args)), 
-            #                  env_id,log_dir,  int(round_num), "primary", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo,lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.constraint_test(*args) ), env_id,log_dir,  int(round_num), "constraint", is_wandb, )
+            visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.primary_test(*args)), 
+                             env_id,log_dir,  int(round_num), "primary", is_wandb, )
             # visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm(gail_trainer.reward_train(*args)),
             #                  env_id,log_dir,  int(round_num), "total", is_wandb, )
             
