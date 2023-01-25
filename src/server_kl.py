@@ -17,6 +17,7 @@ import time
 
 from imitation.algorithms.adversarial.airl3 import AIRL3
 from imitation.algorithms.adversarial.airl5 import AIRL5
+from imitation.algorithms.adversarial.airl6 import AIRL6
 from imitation.algorithms.adversarial.airl_kl import AIRLKL
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
@@ -163,7 +164,7 @@ def main(cfg: DictConfig):
     # primary_net = SigmoidRewardNet(primary_net)
     # constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
     # primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
-    gail_trainer = AIRLKL(
+    gail_trainer = AIRL6(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -175,7 +176,7 @@ def main(cfg: DictConfig):
         log_dir=log_dir,
         primary_net=primary_net,
         constraint_net=constraint_net,
-        custom_net=custom_net,
+        # custom_net=custom_net,
         disc_opt_cls=opt_cls[rew_opt],
         # primary_disc_opt_cls=opt_cls[primary_opt],
         # primary_disc_opt_kwargs={"lr":disc_lr},

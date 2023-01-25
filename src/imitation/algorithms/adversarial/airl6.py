@@ -33,7 +33,7 @@ from stable_baselines3.common.utils import obs_as_tensor, safe_mean
 STOCHASTIC_POLICIES = (sac_policies.SACPolicy, policies.ActorCriticPolicy)
 from imitation.util.networks import RunningNorm
 
-class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
+class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
     """Adversarial Inverse Reinforcement Learning (`AIRL`_).
 
     .. _AIRL: https://arxiv.org/abs/1710.11248
@@ -352,6 +352,19 @@ class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
     def _next_expert_batch(self) -> Mapping:
         return next(self._endless_expert_iterator)
 
+    def reg(
+        self,
+        net,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        done: th.Tensor, 
+    ):
+
+        const_output_train = net(state, action, next_state, done)
+        reward = 0.5 * const_output_train ** 2 
+        return reward.mean()
+
     def train_disc(
         self,
         *,
@@ -398,23 +411,29 @@ class AIRL5(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["labels_expert_is_one"].float(),
             )
 
-            new_batch = self._make_disc_train_batch(
-                gen_samples=gen_samples,
-                expert_samples=gen_samples,
-            )
             primary_disc_logits = self.primary_logits_expert_is_high(
-                new_batch["state"],
-                new_batch["primary_action"],
-                new_batch["next_state"],
-                new_batch["done"],
-                new_batch["primary_log_policy_act_prob"],
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+                batch["log_policy_act_prob"],
             )
             primary_loss =F.binary_cross_entropy_with_logits(
                 primary_disc_logits,
-                new_batch["labels_expert_is_one"].float(),
+                batch["labels_expert_is_one"].float(),
             ) 
             
-            loss += 5.0*primary_loss 
+            reg_loss = self.reg(
+                self._primary_net,
+                batch["state"],
+                batch["action"],
+                batch["next_state"],
+                batch["done"],
+            )
+            
+            loss += 1.0*primary_loss 
+            # loss += reg_loss
+            
             for op in self._disc_opt:
                 op.zero_grad()
             loss.backward()
