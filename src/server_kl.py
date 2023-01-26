@@ -65,9 +65,9 @@ def make_env(env_id, rank, seed=0):
     return _init
 
 def reward_fn(s, a, ns, d):
-    # return th.concat([s[...,[0,1]], ns[...,[0,1]]], dim=0)
-    return  s[...,[0,1,2]]
-combined_size  = 3
+    return th.concat([s[...,[0,1]], ns[...,[0,1]]], dim=-1)
+    # return  ns[...,[0,1,2]]
+combined_size  = 4
 @hydra.main(config_path="config", config_name="common")
 def main(cfg: DictConfig):
     
@@ -150,9 +150,9 @@ def main(cfg: DictConfig):
     constraint_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
         # hid_sizes=[hid_size, hid_size],
-        use_state=True,
+        use_state=False,
         use_action=False,
-        use_next_state=False,
+        use_next_state=True,
     )
 
     custom_net = BasicRewardNet(

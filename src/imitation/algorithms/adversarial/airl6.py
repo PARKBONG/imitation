@@ -359,10 +359,16 @@ class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
         action: th.Tensor,
         next_state: th.Tensor,
         done: th.Tensor, 
+        method = 'l2',
     ):
 
         const_output_train = net(state, action, next_state, done)
-        reward = 0.5 * const_output_train ** 2 
+        if method == 'l1':
+            reward = th.abs(const_output_train)
+        elif method == 'l2':
+            reward = const_output_train ** 2 
+        else:
+            assert False
         return reward.mean()
 
     def train_disc(
@@ -429,6 +435,7 @@ class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
+                'l2',
             )
            
             reg_loss2 = self.reg(
@@ -437,9 +444,10 @@ class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["action"],
                 batch["next_state"],
                 batch["done"],
+                'l1',
             ) 
             loss += 5.0*primary_loss 
-            loss += reg_loss1 + reg_loss2
+            loss += 0.*reg_loss1 + 0.3*reg_loss2
             
             for op in self._disc_opt:
                 op.zero_grad()
