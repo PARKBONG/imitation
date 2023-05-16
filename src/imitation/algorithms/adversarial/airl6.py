@@ -59,6 +59,7 @@ class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
         constraint_net: reward_nets.RewardNet,
         n_disc_updates_per_round: int = 2,
         log_dir: str = "output/",
+        reg_coeff,
         disc_opt_cls: Type[th.optim.Optimizer] = th.optim.Adam,
         disc_opt_kwargs: Optional[Mapping] = None,
         primary_disc_opt_kwargs: Optional[Mapping] = None,
@@ -138,8 +139,9 @@ class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
         self._primary_net = primary_net.to(gen_algo.device)
         self._constraint_net = constraint_net.to(gen_algo.device)
         # self._constraint_net =lambda *args: self._reward_net(*args) - self._primary_net(*args)#.detach() 
-        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args).detach() 
+        self._reward_net =lambda *args: self._constraint_net(*args) + self._primary_net(*args)#.detach() 
         self._running_norm = RunningNorm(1).to(gen_algo.device)
+        self.reg_coeff = reg_coeff
         
         # self._reward_net = reward_net.to(gen_algo.device)
 
@@ -352,6 +354,23 @@ class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
     def _next_expert_batch(self) -> Mapping:
         return next(self._endless_expert_iterator)
 
+    def val_reg(
+        self,
+        Q_net,
+        r_net,
+        state: th.Tensor,
+        action: th.Tensor,
+        next_state: th.Tensor,
+        next_action: th.Tensor,
+        done: th.Tensor, 
+    ):
+        Q_cur = Q_net(state, action, next_state=next_state, done=done)#.detach()
+        Q_next = Q_net(next_state, next_action, next_state=next_state, done=done)#.detach()
+        r_net = r_net(state, action, next_state, done)  
+        reg1 = ((self.gen_algo.gamma * Q_next - Q_cur - r_net)**2).mean()
+
+        return reg1
+
     def reg(
         self,
         net,
@@ -446,8 +465,9 @@ class AIRL6(base.DemonstrationAlgorithm[types.Transitions]):
                 batch["done"],
                 'l1',
             ) 
-            loss += 5.0*primary_loss 
-            loss += 0.*reg_loss1 + 0.3*reg_loss2
+            loss += self.reg_coeff[0]*primary_loss 
+            loss += self.reg_coeff[1]*reg_loss1 + self.reg_coeff[2]*reg_loss2
+            # loss += 0.*reg_loss1 + 0.3*reg_loss2
             
             for op in self._disc_opt:
                 op.zero_grad()

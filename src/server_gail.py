@@ -108,7 +108,8 @@ def main(cfg: DictConfig):
     n_disc_updates_per_round = int(cfg.disc.n_disc_updates_per_round)
     hid_size = int(cfg.disc.hid_size)
     normalize = cfg.disc.normalize
-    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-neo","final.pkl"))
+    rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","cartpole","final.pkl"))
+    allow_variable_horizon = bool(cfg.allow_variable_horizon)
     
     tensorboard_log = os.path.join(to_absolute_path('logs'), f"{cfg.gen.model}_{cfg.env.env_id}")
 
@@ -208,7 +209,8 @@ def main(cfg: DictConfig):
         # constraint_net=constraint_net,
         # const_disc_opt_kwargs={"lr":disc_lr},
         # primary_disc_opt_kwargs={"lr":disc_lr},
-        custom_logger=custom_logger
+        custom_logger=custom_logger,
+        allow_variable_horizon=allow_variable_horizon,
     )
 
     # learner_rewards_before_training, _ = evaluate_policy(
@@ -231,7 +233,7 @@ def main(cfg: DictConfig):
                 eval_env.render(mode='human')
                 time.sleep(0.05)
             # visualize_reward(gail_trainer.gen_algo, lambda *args: gail_trainer.reward_train(*args)-gail_trainer.primary_train(*args), env_id,log_dir,  int(gail_trainer._disc_step), "constraint", True, )
-            visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(gail_trainer._disc_step), "primary", True, )
+            # visualize_reward(gail_trainer.gen_algo, gail_trainer.reward_train, env_id,log_dir,  int(gail_trainer._disc_step), "primary", True, )
             # visualize_reward(gail_trainer.gen_algo, gail_trainer.constraint_train, "CartPole-Const-v0",log_dir,  str(round_num)+"total", True, )
     gail_trainer.train(int(10e6), callback=cb)  # Note: set to 300000 for better results
     learner_rewards_after_training, _ = evaluate_policy(

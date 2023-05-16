@@ -30,7 +30,18 @@ policy_path=jjh_data/expert_models/cheetah/ \
 rollout_save_path=jjh_data/expert_models/cheetah/final.pkl \
 render
 
-python3 -m imitation.scripts.eval_policy with serving \
+python3 -m imitation.scripts.eval_policy with twodmaze \
+policy_type=ppo_lag \
+policy_path=jjh_data/expert_models/twodmaze-ppo/ \
+rollout_save_path=jjh_data/expert_models/twodmaze-ppo/final.pkl \
+render
+python3 -m imitation.scripts.eval_policy with twodmaze \
+policy_type=sac_lag \
+policy_path=jjh_data/expert_models/twodmaze/ \
+rollout_save_path=jjh_data/expert_models/twodmaze/final.pkl \
+render
+
+python3 -m imitation.scripts.eval_policy with serving_oneway \
 policy_type=sac_lag \
 policy_path=jjh_data/expert_models/serving-oneway/ \
 rollout_save_path=jjh_data/expert_models/serving-oneway/final.pkl \
@@ -40,6 +51,14 @@ policy_type=sac_lag \
 policy_path=jjh_data/expert_models/serving-nov/ \
 rollout_save_path=jjh_data/expert_models/serving-nov/final.pkl \
 render
+
+
+python3 -m imitation.scripts.eval_policy with cartpole \
+policy_type=ppo \
+policy_path=jjh_data/expert_models/cartpole/ \
+rollout_save_path=jjh_data/expert_models/cartpole/final.pkl \
+render
+
 
 python3 -m imitation.scripts.eval_policy with serving \
 policy_type=sac_lag \

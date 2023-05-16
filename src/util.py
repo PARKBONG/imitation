@@ -119,6 +119,205 @@ def plot_reward(model, reward_net, env, log_dir, round_num, tag='', use_wandb=Fa
     print('Save Itr', goal)
     plt.close()
 
+
+def visualize_reward_twodconst(model, reward_net, state, size, log_dir, round_num, tag='',level=None, use_wandb=False, goal='0'):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    
+    state = state
+    action = np.zeros_like(state[...,-2:])
+    next_state = state
+
+    done = np.zeros_like(state[...,-1:])
+
+    # irl_reward = reward_net(state, action, next_state, done)
+    with th.no_grad():
+        state = th.FloatTensor(state).to(model.device)
+        action = th.FloatTensor(action).to(model.device)
+        next_state = th.FloatTensor(next_state).to(model.device)
+
+    done = th.zeros_like(state[...,-1:])
+
+    with th.no_grad():
+        irl_reward = reward_net(state, action, next_state, done)
+
+        irl_reward = irl_reward.cpu().numpy()
+    score = irl_reward
+    
+    if level is None:
+
+        flights = score.copy().reshape([size[0], size[1]])
+        ax = sns.heatmap(score.reshape([size[0], size[1]]), cmap="YlGnBu_r")
+        ax.invert_yaxis()
+        plt.axis('off')
+        smooth_scale = 10
+        z = ndimage.zoom(flights, smooth_scale)
+        contours = np.linspace(np.min(score), np.max(score), 9)
+        cntr = ax.contour(np.linspace(0, size[0], size[1] * smooth_scale),
+                        np.linspace(0, size[0], size[1] * smooth_scale),
+                        z, levels=contours[:-1], colors='red')
+    elif level== -1:
+        
+        flights = score.copy().reshape([size[0], size[1]])
+        # score = ndimage.zoom(flights, 2)
+        ax = sns.heatmap(flights, cmap="YlGnBu_r")
+        ax.invert_yaxis()
+        plt.axis('off')
+        smooth_scale = 10
+        pass
+    else:
+        
+        flights = score.copy().reshape([size[0], size[1]])
+        ax = sns.heatmap(score.reshape([size[0], size[1]]), cmap="YlGnBu_r")
+        ax.invert_yaxis()
+        plt.axis('off')
+        smooth_scale = 10
+        z = ndimage.zoom(flights, smooth_scale)
+        contours = np.array([np.min(score), *level, np.max(score)])
+        cntr = ax.contour(np.linspace(0, size[0], size[1] * smooth_scale),
+                        np.linspace(0, size[0], size[1] * smooth_scale),
+                        z, levels=contours[:-1], colors='red')
+    ax.invert_yaxis()
+    plt.axis('off')
+
+    # ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
+    #             * rescale, marker='*', s=100, c='r', edgecolors='k', linewidths=0.5)
+    if use_wandb:
+        wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
+    # print(score.reshape([num_x, num_y]))
+    savedir = os.path.join(log_dir,"maps")
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+    print(savedir)
+    plt.savefig(savedir + '/%s_%s.png' % (goal, tag))
+    print('Save Itr', goal)
+    plt.close() 
+    
+    
+def visualize_reward_twod(model, reward_net, state, size, log_dir, round_num, tag='',level=None, use_wandb=False, goal='0'):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    
+    state = state
+    action = np.zeros_like(state[...,-2:])
+    next_state = state
+
+    done = np.zeros_like(state[...,-1:])
+
+    # irl_reward = reward_net(state, action, next_state, done)
+    with th.no_grad():
+        state = th.FloatTensor(state).to(model.device)
+        action = th.FloatTensor(action).to(model.device)
+        next_state = th.FloatTensor(next_state).to(model.device)
+
+    done = th.zeros_like(state[...,-1:])
+
+    with th.no_grad():
+        irl_reward = reward_net(state, action, next_state, done)
+
+        irl_reward = irl_reward.cpu().numpy()
+    score = irl_reward
+    
+    score = irl_reward
+
+    score = irl_reward
+    # flights = score.copy().reshape([size[0], size[1]])
+    # ax = sns.heatmap(score.reshape([size[0], size[1]]), cmap="YlGnBu_r")
+    # ax.invert_yaxis()
+    # plt.axis('off')
+    # # plt.show()
+    if level is None:
+
+        flights = score.copy().reshape([size[0], size[1]])
+        ax = sns.heatmap(score.reshape([size[0], size[1]]), cmap="YlGnBu_r")
+        ax.invert_yaxis()
+        plt.axis('off')
+        smooth_scale = 10
+        z = ndimage.zoom(flights, smooth_scale)
+        contours = np.linspace(np.min(score), np.max(score), 9)
+        cntr = ax.contour(np.linspace(0, size[0], size[1] * smooth_scale),
+                        np.linspace(0, size[0], size[1] * smooth_scale),
+                        z, levels=contours[:-1], colors='red')
+    elif level== -1:
+        
+        flights = score.copy().reshape([size[0], size[1]])
+        # score = ndimage.zoom(flights, 2)
+        ax = sns.heatmap(flights, cmap="YlGnBu_r")
+        ax.invert_yaxis()
+        plt.axis('off')
+        smooth_scale = 10
+        pass
+    else:
+        
+        flights = score.copy().reshape([size[0], size[1]])
+        ax = sns.heatmap(score.reshape([size[0], size[1]]), cmap="YlGnBu_r")
+        ax.invert_yaxis()
+        plt.axis('off')
+        smooth_scale = 10
+        z = ndimage.zoom(flights, smooth_scale)
+        contours = np.array([np.min(score), *level, np.max(score)])
+        cntr = ax.contour(np.linspace(0, size[0], size[1] * smooth_scale),
+                        np.linspace(0, size[0], size[1] * smooth_scale),
+                        z, levels=contours[:-1], colors='red')
+    ax.invert_yaxis()
+    plt.axis('off')
+
+    # ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
+    #             * rescale, marker='*', s=100, c='r', edgecolors='k', linewidths=0.5)
+    if use_wandb:
+        wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
+    # print(score.reshape([num_x, num_y]))
+    savedir = os.path.join(log_dir,"maps")
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+    print(savedir)
+    plt.savefig(savedir + '/%s_%s.png' % (goal, tag))
+    print('Save Itr', goal)
+    plt.close() 
+    
+
+def visualize_reward_twod_gt(state, size, log_dir, round_num, tag='', level=None, use_wandb=False, goal='0'):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    
+
+    score = state
+    flights = score.copy().reshape([size[0], size[1]])
+    ax = sns.heatmap(score.reshape([size[0], size[1]]), cmap="YlGnBu_r")
+    ax.invert_yaxis()
+    plt.axis('off')
+    # plt.show()
+    if level is None:
+        pass
+        # smooth_scale = 10
+        # z = ndimage.zoom(flights, smooth_scale)
+        # contours = np.linspace(np.min(score), np.max(score), 9)
+        # cntr = ax.contour(np.linspace(0, size[0], size[1] * smooth_scale),
+        #                 np.linspace(0, size[0], size[1] * smooth_scale),
+        #                 z, levels=contours[:-1], colors='red')
+    else:
+        smooth_scale = 10
+        z = ndimage.zoom(flights, smooth_scale)
+        contours = np.array([np.min(score), *level, np.max(score)])
+        cntr = ax.contour(np.linspace(0, size[0], size[1] * smooth_scale),
+                        np.linspace(0, size[0], size[1] * smooth_scale),
+                        z, levels=contours[:-1], colors='red')
+    ax.invert_yaxis()
+    plt.axis('off')
+
+    # ax.scatter((target[0]-boundary_low)*rescale, (target[1]-boundary_low)
+    #             * rescale, marker='*', s=100, c='r', edgecolors='k', linewidths=0.5)
+    if use_wandb:
+        wandb.log({f"rewards_map({goal})/{tag}": wandb.Image(plt)}, step=round_num)
+    # print(score.reshape([num_x, num_y]))
+    savedir = os.path.join(log_dir,"maps")
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+    print(savedir)
+    plt.savefig(savedir + '/%s_%s.png' % (goal, tag))
+    print('Save Itr', goal)
+    plt.close() 
+    
 def visualize_reward(model, reward_net, env_id, log_dir, round_num, tag='', use_wandb=False, goal=1.0):
     import seaborn as sns
     import matplotlib.pyplot as plt

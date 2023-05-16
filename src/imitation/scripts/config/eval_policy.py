@@ -140,13 +140,47 @@ def serving_oneway():
     max_episode_steps = 100,
     num_vec = 8  # number of environments in VecEnv)
     )
-    
+   
 @eval_policy_ex.named_config
 def serving():
     eval_n_timesteps = int(100e2)  # Min timesteps to evaluate, optional.
     common = dict(env_name="Serving-v0",
     max_episode_steps = 100,
     num_vec = 8  # number of environments in VecEnv)
+    )
+ 
+  
+@eval_policy_ex.named_config
+def twodconst_v0():
+    eval_n_timesteps = int(10*100)  # Min timesteps to evaluate, optional.
+    common = dict(env_name="TwoDConstraint-v0",
+    max_episode_steps = 100,
+    num_vec = 32 # number of environments in VecEnv)
+    )
+
+
+@eval_policy_ex.named_config
+def twodconst_v1():
+    eval_n_timesteps = int(10*200)  # Min timesteps to evaluate, optional.
+    common = dict(env_name="TwoDConstraint-v1",
+    max_episode_steps = 200,
+    num_vec = 32 # number of environments in VecEnv)
+    )
+
+@eval_policy_ex.named_config
+def twodcontact():
+    eval_n_timesteps = int(20*100)  # Min timesteps to evaluate, optional.
+    common = dict(env_name="TwoDContact-v0",
+    max_episode_steps = 100,
+    num_vec = 32 # number of environments in VecEnv)
+    )
+    
+@eval_policy_ex.named_config
+def twodmaze():
+    eval_n_timesteps = int(1000*20)  # Min timesteps to evaluate, optional.
+    common = dict(env_name="TwoDMaze-v0",
+    max_episode_steps = 20,
+    num_vec = 32 # number of environments in VecEnv)
     )
 
 @eval_policy_ex.named_config

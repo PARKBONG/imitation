@@ -2,11 +2,11 @@
 import numpy as np
 import gym
 from stable_baselines3 import  SAC
-from sb3_contrib import PPO, SACLagrangian
+from sb3_contrib import PPO, SAC
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv
 # from stable_baselines3.sac import MlpPolicy2
-from sb3_contrib.sac_lagrangian import MlpPolicy
+from sb3_contrib.sac_custom import MlpPolicy
 
 from imitation.algorithms.adversarial.airl import AIRL
 from imitation.data import rollout
@@ -28,12 +28,12 @@ def load_rollouts(dir):
     return rollouts
 
 env = gym.make("Serving-v3")
-expert = SACLagrangian(policy=MlpPolicy, env=env)
+expert = SAC(policy=MlpPolicy, env=env)
 expert.learn(1000)
 rollouts = load_rollouts(os.path.join(to_absolute_path('.'), "../jjh_data/expert_models/","serving-oneway","final.pkl"))
     
 venv = make_vec_env("Serving-v3", n_envs=8)
-learner = SACLagrangian(env=venv, policy=MlpPolicy)
+learner = SAC(env=venv, policy=MlpPolicy)
 reward_net = BasicShapedRewardNet(
     venv.observation_space,
     venv.action_space,

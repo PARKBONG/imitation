@@ -5,6 +5,7 @@ render: False
 device: "cuda"
 is_wandb: False
 project: ${env.env_id}_irdd
+allow_variable_horizon: False 
 
 env:
   r_gamma: 0.99
