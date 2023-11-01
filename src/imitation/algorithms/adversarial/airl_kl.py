@@ -309,7 +309,7 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             raise TypeError(
                 "Non-None `log_policy_act_prob` is required for this method.",
             )
-        const_output_train = self._custom_net(state, action, next_state, done)
+        const_output_train = self._primary_net(state, action, next_state, done)
         return const_output_train  #- primary_log_policy_act_prob
 
     @property
@@ -626,8 +626,8 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             self._disc_step += 1
 
             reg_loss = self.train_project(
-                q_net = self._custom_net,
-                r_net = self._primary_net,
+                q_net = self._primary_net,
+                r_net = self._custom_net,
             )
             # compute/write stats and TensorBoard data
             with th.no_grad():

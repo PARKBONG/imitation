@@ -20,7 +20,7 @@ disc:
   normalize: None
   reward_net_opt: AdamW
   primary_net_opt: AdamW
-  constraint_net_opt: None
+  constraint_net_opt: AdamW
   coef: [1.0, 1.0, 0.0]
   reg_coef: [0.1, 0.1, 0.1]
   clip_range: 0.2

@@ -160,6 +160,22 @@ def twodconst_v0():
 
 
 @eval_policy_ex.named_config
+def twodconst_real():
+    eval_n_timesteps = int(40*30)  # Min timesteps to evaluate, optional.
+    common = dict(env_name="TwoDConstraintReal-v0",
+    max_episode_steps = 40,
+    num_vec = 32 # number of environments in VecEnv)
+    )
+
+@eval_policy_ex.named_config
+def twodconst_v2():
+    eval_n_timesteps = int(30*50)  # Min timesteps to evaluate, optional.
+    common = dict(env_name="TwoDConstraint-v2",
+    max_episode_steps = 30,
+    num_vec = 32 # number of environments in VecEnv)
+    )
+
+@eval_policy_ex.named_config
 def twodconst_v1():
     eval_n_timesteps = int(10*200)  # Min timesteps to evaluate, optional.
     common = dict(env_name="TwoDConstraint-v1",
