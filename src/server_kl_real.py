@@ -162,29 +162,36 @@ def main(cfg: DictConfig):
     constraint_net = BasicShapedRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
         # hid_sizes=[hid_size, hid_size],
-        reward_hid_sizes=[16,16],
-        potential_hid_sizes=[32,32],
+        reward_hid_sizes=[32,32],
+        potential_hid_sizes=[64,64],
         use_state=True,
         use_action=False,
         use_next_state=False,
     )
 
-    custom_net = BasicRewardNet(
+    primary_net = BasicRewardNet(
         venv.observation_space, venv.action_space, normalize_input_layer=normalize_layer[normalize],#RunningNorm,
         hid_sizes=[hid_size, hid_size],
     )
-    primary_net = PredefinedShapedRewardNet(
+    custom_net = PredefinedShapedRewardNet(
             venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=False, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         discount_factor=0.99,
         reward_hid_sizes=[32,32],
         potential_hid_sizes=[64,64],
     )
     
+    custom_net = PredefinedShapedRewardNet(
+            venv.observation_space, venv.action_space, reward_fn=reward_fn, combined_size=combined_size, use_action=False, normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
+        discount_factor=0.99,
+        reward_hid_sizes=[32,32],
+        potential_hid_sizes=[64,64],
+    )
+     
     gt_nets = FixedRewardNet(
             venv.observation_space, venv.action_space, reward_fn=gt_net, combined_size=combined_size, use_action=True, #normalize_input_layer=normalize_layer[normalize], #RunningNorm, #RunningNorm,
         #hid_sizes=[hid_size, hid_size],
     )
-    gail_trainer = AIRL6(
+    gail_trainer = AIRLKL(
         demonstrations=rollouts,
         demo_batch_size=demo_batch_size,
         gen_replay_buffer_capacity=gen_replay_buffer_capacity,
@@ -196,8 +203,8 @@ def main(cfg: DictConfig):
         log_dir=log_dir,
         primary_net=primary_net,
         constraint_net=constraint_net,
-        reg_coeff=reg_coeff,
-        # custom_net=custom_net,
+        # reg_coeff=reg_coeff,
+        custom_net=custom_net,
         disc_opt_cls=opt_cls[rew_opt],
         # primary_disc_opt_cls=opt_cls[primary_opt],
         # primary_disc_opt_kwargs={"lr":disc_lr},
@@ -205,7 +212,6 @@ def main(cfg: DictConfig):
         # const_disc_opt_kwargs={"lr":disc_lr},
         custom_logger=custom_logger
     )
-
     # reward_net = NormalizedRewardNet(reward_net, normalize_output_layer=RunningNorm)
     # constraint_net = NormalizedRewardNet(constraint_net, normalize_output_layer=RunningNorm)
     # primary_net = NormalizedRewardNet(primary_net, normalize_output_layer=RunningNorm)
@@ -231,7 +237,6 @@ def main(cfg: DictConfig):
     test_env = gym.make("TwoDConstraintReal-v1")
     if render:
         eval_env.render(mode='human')
-    checkpoint_interval=50
     # visualize_reward_gt(env_id='',log_dir=log_dir)
     
     test_env.reset()
@@ -300,6 +305,7 @@ def main(cfg: DictConfig):
                             tag="gt_constraint", 
                             use_wandb=is_wandb, 
                             goal='left')
+    checkpoint_interval=10
     def cb(round_num):
         if checkpoint_interval > 0 and round_num % checkpoint_interval == 0:
             save(gail_trainer, os.path.join(log_dir, "checkpoints", f"{round_num:05d}"))
@@ -374,12 +380,12 @@ def main(cfg: DictConfig):
             #                       use_wandb=is_wandb, 
             #                       goal='left')
 
-            visualize_reward_twodconst(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.primary_test(*args)) ,
+            visualize_reward_twodconst(gail_trainer.gen_algo, lambda *args: gail_trainer._running_norm( 1.0 * gail_trainer.custom_test(*args)) ,
                                     state=states_m,
                                   size=(cnt_x,cnt_y),
                                   log_dir=log_dir,
                                   round_num=int(round_num), 
-                                  tag="primary", 
+                                  tag="custom", 
                                   use_wandb=is_wandb, 
                                   goal='mid')
             # visualize_reward_twod(gail_trainer.gen_algo, lambda *args:  gail_trainer._running_norm(1.0 * gail_trainer.primary_test(*args)) ,

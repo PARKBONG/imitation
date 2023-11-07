@@ -628,7 +628,7 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
             reg_loss = self.train_project(
                 q_net = self._primary_net,
                 r_net = self._custom_net,
-            )
+            ) 
             # compute/write stats and TensorBoard data
             with th.no_grad():
                 train_stats = compute_train_stats(
@@ -767,12 +767,12 @@ class AIRLKL(base.DemonstrationAlgorithm[types.Transitions]):
         self,
         q_net,
         r_net,
-        num_itr = 5,
+        num_itr = 10,
     ):
         total_loss = 0
         for itr in range(num_itr):
             expert_samples = self._next_expert_batch()
-            gen_samples = self._gen_replay_buffer.sample(self.gen_replay_buffer_capacity)
+            gen_samples = self._gen_replay_buffer.sample(self.demo_batch_size)
             gen_samples = types.dataclass_quick_asdict(gen_samples)
 
             if gen_samples is None:
