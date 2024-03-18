@@ -95,7 +95,7 @@ setup(
     long_description=get_readme(),
     long_description_content_type="text/markdown",
     author="Center for Human-Compatible AI and Google",
-    python_requires=">=3.8.0",
+    # python_requires=">=3.8.0",
     packages=find_packages("src"),
     package_dir={"": "src"},
     package_data={"imitation": ["py.typed", "envs/examples/airl_envs/assets/*.xml"]},
